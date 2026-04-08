@@ -4,7 +4,7 @@
       "id": "site-potential--solar-availability--surface-irradiation",
       "display_name": "Surface Irradiation",
       "position_in_tree": ["Site Potential", "Solar Availability", "Surface Irradiation"],
-      "tooltip": "Which parts of my building are worth covering with PV?",
+      "tooltip": "How does solar radiation vary across my building's surfaces?",
       "data_source": "CEA",
       "status": "complete"
     },
@@ -12,7 +12,7 @@
       "id": "site-potential--solar-availability--temporal-availability--seasonal-patterns",
       "display_name": "Seasonal Patterns",
       "position_in_tree": ["Site Potential", "Solar Availability", "Temporal Availability", "Seasonal Patterns"],
-      "tooltip": "When during the year does my building get the most solar energy?",
+      "tooltip": "How does solar availability shift across the seasons?",
       "data_source": "CEA",
       "status": "complete"
     },
@@ -20,7 +20,7 @@
       "id": "site-potential--solar-availability--temporal-availability--daily-patterns",
       "display_name": "Daily Patterns",
       "position_in_tree": ["Site Potential", "Solar Availability", "Temporal Availability", "Daily Patterns"],
-      "tooltip": "What does a typical good vs. bad solar day look like for my building?",
+      "tooltip": "How does solar availability vary across a typical day and throughout the year?",
       "data_source": "CEA",
       "status": "complete"
     },
@@ -28,7 +28,7 @@
       "id": "site-potential--envelope-suitability",
       "display_name": "Envelope Suitability",
       "position_in_tree": ["Site Potential", "Envelope Suitability"],
-      "tooltip": "How much of my building envelope can actually be used for BIPV?",
+      "tooltip": "How much of my building envelope is physically available for BIPV installation?",
       "data_source": "CEA",
       "status": "planned"
     },
@@ -36,7 +36,7 @@
       "id": "site-potential--contextual-shading",
       "display_name": "Contextual Shading",
       "position_in_tree": ["Site Potential", "Contextual Shading"],
-      "tooltip": "Are neighbouring buildings blocking solar access to my facades?",
+      "tooltip": "How do neighbouring buildings affect solar access across my facades?",
       "data_source": "CEA",
       "status": "planned"
     },
@@ -44,7 +44,7 @@
       "id": "site-potential--contextual-feasibility--infrastructure-readiness",
       "display_name": "Infrastructure Readiness",
       "position_in_tree": ["Site Potential", "Contextual Feasibility", "Infrastructure Readiness"],
-      "tooltip": "Does my city have the grid infrastructure to support BIPV?",
+      "tooltip": "How prepared is the local grid infrastructure to support BIPV in this location?",
       "data_source": "Internet",
       "status": "planned"
     },
@@ -52,7 +52,7 @@
       "id": "site-potential--contextual-feasibility--regulatory-constraints",
       "display_name": "Regulatory Constraints",
       "position_in_tree": ["Site Potential", "Contextual Feasibility", "Regulatory Constraints"],
-      "tooltip": "Are there local planning rules or permits I need to consider for BIPV?",
+      "tooltip": "What local planning rules and permits apply to BIPV in this location?",
       "data_source": "Internet",
       "status": "planned"
     },
@@ -60,7 +60,7 @@
       "id": "site-potential--contextual-feasibility--basic-economic-signal",
       "display_name": "Basic Economic Signal",
       "position_in_tree": ["Site Potential", "Contextual Feasibility", "Basic Economic Signal"],
-      "tooltip": "Does the local energy price make BIPV financially worth it in this context?",
+      "tooltip": "How does the local energy market context shape the economic case for BIPV?",
       "data_source": "Internet",
       "status": "planned"
     },
@@ -68,7 +68,7 @@
       "id": "performance-estimation--energy-generation",
       "display_name": "Energy Generation",
       "position_in_tree": ["Performance Estimation", "Energy Generation"],
-      "tooltip": "How much electricity will my BIPV system actually produce?",
+      "tooltip": "How much electricity does this BIPV system generate across the year?",
       "data_source": "CEA",
       "status": "planned"
     },
@@ -76,7 +76,7 @@
       "id": "performance-estimation--demand-vs-supply-time-match",
       "display_name": "Demand vs Supply Time Match",
       "position_in_tree": ["Performance Estimation", "Demand vs Supply Time Match"],
-      "tooltip": "Does my building use energy at the same time it generates it?",
+      "tooltip": "How well does my building's energy demand align with its solar generation?",
       "data_source": "CEA",
       "status": "planned"
     },
@@ -84,7 +84,7 @@
       "id": "performance-estimation--self-sufficiency",
       "display_name": "Self Sufficiency",
       "position_in_tree": ["Performance Estimation", "Self Sufficiency"],
-      "tooltip": "What percentage of my building's energy demand can BIPV cover?",
+      "tooltip": "To what extent can this BIPV system cover the building's own energy demand?",
       "data_source": "CEA",
       "status": "planned"
     },
@@ -92,7 +92,7 @@
       "id": "performance-estimation--performance-variation--seasonal",
       "display_name": "Seasonal Performance Variation",
       "position_in_tree": ["Performance Estimation", "Performance Variation", "Seasonal"],
-      "tooltip": "How much does my BIPV output change between summer and winter?",
+      "tooltip": "How does BIPV output vary across the seasons for this building?",
       "data_source": "CEA",
       "status": "planned"
     },
@@ -100,7 +100,7 @@
       "id": "performance-estimation--performance-variation--daily",
       "display_name": "Daily Performance Variation",
       "position_in_tree": ["Performance Estimation", "Performance Variation", "Daily"],
-      "tooltip": "How does my BIPV output change throughout the day?",
+      "tooltip": "How does BIPV output vary across a typical day for this building?",
       "data_source": "CEA",
       "status": "planned"
     },
@@ -108,7 +108,7 @@
       "id": "impact-and-viability--carbon-impact--operational-carbon-footprint",
       "display_name": "Operational Carbon Footprint",
       "position_in_tree": ["Impact and Viability", "Carbon Impact", "Operational Carbon Footprint"],
-      "tooltip": "What are the operational carbon emissions of my building with BIPV?",
+      "tooltip": "How do operational carbon emissions look for this building with BIPV?",
       "data_source": "CEA",
       "status": "planned"
     },
@@ -116,7 +116,7 @@
       "id": "impact-and-viability--carbon-impact--embodied-carbon",
       "display_name": "Embodied Carbon of PV Panels",
       "position_in_tree": ["Impact and Viability", "Carbon Impact", "Embodied Carbon"],
-      "tooltip": "How much carbon was emitted to manufacture my BIPV panels?",
+      "tooltip": "How much carbon is embedded in the manufacturing of these BIPV panels?",
       "data_source": "LLM knowledge",
       "status": "planned"
     },
@@ -124,7 +124,7 @@
       "id": "impact-and-viability--carbon-impact--carbon-payback-period",
       "display_name": "Carbon Payback Period",
       "position_in_tree": ["Impact and Viability", "Carbon Impact", "Carbon Payback Period"],
-      "tooltip": "How many years until my BIPV panels offset the carbon cost of making them?",
+      "tooltip": "How long does it take for this BIPV system to offset its own manufacturing emissions?",
       "data_source": "CEA + calculation",
       "status": "planned"
     },
@@ -132,7 +132,7 @@
       "id": "impact-and-viability--carbon-impact--abated-emissions",
       "display_name": "Abated Emissions vs Grid",
       "position_in_tree": ["Impact and Viability", "Carbon Impact", "Abated Emissions vs Grid"],
-      "tooltip": "How much CO2 does my BIPV system prevent compared to grid electricity?",
+      "tooltip": "How much carbon does this BIPV system avoid compared to drawing from the grid?",
       "data_source": "CEA + Internet",
       "status": "planned"
     },
@@ -140,7 +140,7 @@
       "id": "impact-and-viability--economic-viability--lcoe",
       "display_name": "LCOE by Panel Type",
       "position_in_tree": ["Impact and Viability", "Economic Viability", "LCOE by Panel Type"],
-      "tooltip": "What is the true cost per kWh of electricity from my BIPV system over its lifetime?",
+      "tooltip": "How do different panel types compare in terms of lifetime cost per unit of energy?",
       "data_source": "CEA + calculation",
       "status": "planned"
     },
@@ -148,7 +148,7 @@
       "id": "impact-and-viability--economic-viability--simple-payback",
       "display_name": "Simple Payback Period",
       "position_in_tree": ["Impact and Viability", "Economic Viability", "Simple Payback Period"],
-      "tooltip": "How many years until my BIPV system pays back its installation cost?",
+      "tooltip": "How long does it take for this BIPV system to recover its installation cost?",
       "data_source": "CEA + calculation",
       "status": "planned"
     },
@@ -156,7 +156,7 @@
       "id": "impact-and-viability--economic-viability--cost-vs-grid",
       "display_name": "Cost vs Grid Electricity",
       "position_in_tree": ["Impact and Viability", "Economic Viability", "Cost vs Grid"],
-      "tooltip": "Is generating my own electricity with BIPV cheaper than buying from the grid?",
+      "tooltip": "How does the cost of BIPV-generated electricity compare to the local grid tariff?",
       "data_source": "Internet",
       "status": "planned"
     },
@@ -164,7 +164,7 @@
       "id": "impact-and-viability--economic-viability--subsidies",
       "display_name": "Available Subsidies",
       "position_in_tree": ["Impact and Viability", "Economic Viability", "Available Subsidies"],
-      "tooltip": "Are there government incentives or subsidies available for BIPV in my location?",
+      "tooltip": "What financial incentives or subsidies are available for BIPV in this location?",
       "data_source": "Internet",
       "status": "planned"
     },
@@ -172,7 +172,7 @@
       "id": "optimize-my-design--panel-type-tradeoff",
       "display_name": "Panel Type Trade-off",
       "position_in_tree": ["Optimize My Design", "Panel Type Trade-off"],
-      "tooltip": "Which PV panel type gives the best balance of efficiency, cost, and carbon for my project?",
+      "tooltip": "How do different panel types compare across efficiency, cost, and carbon for this project?",
       "data_source": "CEA + LLM knowledge",
       "status": "planned"
     },
@@ -180,7 +180,7 @@
       "id": "optimize-my-design--radiation-threshold",
       "display_name": "Radiation Threshold",
       "position_in_tree": ["Optimize My Design", "Radiation Threshold"],
-      "tooltip": "What radiation threshold should I use and how does it affect my results?",
+      "tooltip": "How does the radiation threshold setting affect which surfaces are included in the analysis?",
       "data_source": "CEA + LLM knowledge",
       "status": "planned"
     },
@@ -188,7 +188,7 @@
       "id": "optimize-my-design--roof-vs-facade",
       "display_name": "Roof vs Facade Trade-off",
       "position_in_tree": ["Optimize My Design", "Roof vs Facade"],
-      "tooltip": "Should I prioritise roof or facade BIPV for my specific buildings?",
+      "tooltip": "How do roof and facade surfaces compare in terms of BIPV performance for this building?",
       "data_source": "CEA",
       "status": "planned"
     },
@@ -196,7 +196,7 @@
       "id": "optimize-my-design--orientation",
       "display_name": "Building Orientation",
       "position_in_tree": ["Optimize My Design", "Orientation"],
-      "tooltip": "How does my building's orientation affect BIPV performance?",
+      "tooltip": "How does building orientation influence solar exposure and BIPV output?",
       "data_source": "CEA",
       "status": "planned"
     }
