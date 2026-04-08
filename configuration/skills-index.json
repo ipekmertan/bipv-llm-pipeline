@@ -33,10 +33,10 @@
       "status": "planned"
     },
     {
-      "id": "site-potential--contextual-shading",
-      "display_name": "Contextual Shading",
-      "position_in_tree": ["Site Potential", "Contextual Shading"],
-      "tooltip": "How do neighbouring buildings affect solar access across my facades?",
+      "id": "site-potential--massing-and-shading-strategy",
+      "display_name": "Massing & Shading Strategy",
+      "position_in_tree": ["Site Potential", "Massing & Shading Strategy"],
+      "tooltip": "How do surrounding buildings and context affect solar access, and how can massing decisions maximise BIPV potential?",
       "data_source": "CEA",
       "status": "planned"
     },
