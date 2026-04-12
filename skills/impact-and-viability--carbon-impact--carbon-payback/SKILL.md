@@ -18,13 +18,11 @@ From these it calculates the carbon payback period and the total lifetime net ca
 
 ---
 
-## CEA4 Integration
+## File Source
 
-This skill runs as a CEA4 plugin. All data is read automatically via the CEA4 `InputLocator`.
+This skill reads from the uploaded CEA project zip. The app finds the relevant files automatically by filename — no manual file selection needed.
 
-**Location context** read automatically from project weather file:
-```python
-locator.get_weather()  # → city, latitude, longitude
+**Location context** is taken from the project's weather file (`.epw`) found inside the zip.
 ```
 
 **Lifecycle emissions data** accessed via InputLocator:
