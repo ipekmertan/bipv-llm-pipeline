@@ -183,41 +183,45 @@ def render_threshold_check(threshold_result):
     country = threshold_result["country"]
     em_grid = threshold_result["em_grid"]
     recommended = threshold_result["recommended_threshold"]
-    cea_threshold = threshold_result["cea_threshold"]
-    match = threshold_result["match"]
 
     st.markdown("---")
     st.markdown("**Parameter check**")
 
-    col_left, col_right = st.columns(2)
-    with col_left:
-        st.markdown(
-            f'<div class="param-box-red">The <strong>radiation threshold</strong> is currently set to '
-            f'{int(cea_threshold)} kWh/m²/year</div>',
-            unsafe_allow_html=True
-        )
-    with col_right:
-        st.markdown(
-            f'<div class="param-box-green">For {city}, {country} '
-            f'(grid: {em_grid} kgCO₂/kWh), the <strong>radiation threshold</strong> '
-            f'should be set to {int(recommended)} kWh/m²/year</div>',
-            unsafe_allow_html=True
-        )
-
-    if not match:
-        st.markdown(
-            f'<div class="param-warning">⚠ Your results are based on a threshold of '
-            f'{int(cea_threshold)} kWh/m²/year. The correct threshold for your location is '
-            f'{int(recommended)} kWh/m²/year. Please correct this in CEA, rerun the simulation, '
-            f'and re-upload the updated zip.</div>',
-            unsafe_allow_html=True
-        )
-    else:
-        st.markdown(
-            '<div class="param-ok">✓ Threshold verified — your simulation used the correct '
-            'parameter for this location.</div>',
-            unsafe_allow_html=True
-        )
+    table_html = f"""
+<table style="width:100%;border-collapse:collapse;font-size:13px;font-family:Inter,sans-serif;">
+  <thead>
+    <tr style="border-bottom:1.5px solid #e0e0e0;">
+      <th style="text-align:left;padding:10px 14px;font-weight:600;color:#888;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;width:18%;">Simulation</th>
+      <th style="text-align:left;padding:10px 14px;font-weight:600;color:#888;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;width:18%;">Parameter</th>
+      <th style="text-align:left;padding:10px 14px;font-weight:600;color:#888;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;width:44%;">Info</th>
+      <th style="text-align:left;padding:10px 14px;font-weight:600;color:#888;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;width:20%;">Recommended value</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr style="border-bottom:1px solid #f0f0f0;">
+      <td style="padding:12px 14px;color:#333;vertical-align:top;">Solar Irradiation<br>PV Yield<br>PVT Yield</td>
+      <td style="padding:12px 14px;color:#333;vertical-align:top;">annual-radiation-threshold</td>
+      <td style="padding:12px 14px;color:#444;line-height:1.6;vertical-align:top;">
+        For <strong>{city}, {country}</strong> (grid: {em_grid} kgCO₂/kWh), the radiation threshold should be set to <strong>{int(recommended)} kWh/m²/year</strong>
+      </td>
+      <td style="padding:12px 14px;vertical-align:top;">
+        <span style="font-weight:600;color:#1a1a1a;">{int(recommended)} kWh/m²/year</span>
+        <button onclick="navigator.clipboard.writeText('{int(recommended)}')"
+          style="margin-left:8px;padding:3px 8px;border:1px solid #ddd;border-radius:5px;
+          background:white;cursor:pointer;font-size:11px;color:#555;">copy</button>
+      </td>
+    </tr>
+  </tbody>
+</table>
+"""
+    st.markdown(table_html, unsafe_allow_html=True)
+    st.markdown("")
+    st.markdown(
+        '<div style="background:#fff8e1;color:#7c5e00;border:1px solid #ffe082;border-radius:8px;padding:10px 14px;font-size:12.5px;margin-top:4px;">'
+        '⚠ If your simulation used a different threshold, please correct it in CEA, '
+        'click \'Save settings\', rerun the simulation, and re-upload the updated zip.</div>',
+        unsafe_allow_html=True
+    )
 
     # Reasoning expander
     with st.expander("Reasoning"):
@@ -314,9 +318,8 @@ else:
         else:
             render_threshold_check(st.session_state.threshold_result)
 
-    col_left, col_right = st.columns([1, 1], gap="large")
-
-    with col_left:
+    # ── Tree section (full width) ──────────────────────────────────────────────
+    with st.container():
         st.markdown("### Build your analysis")
         sims = st.session_state.cea_data["available_simulations"]
         st.caption("Loaded: " + " · ".join(f"✓ {s}" for s in sims))
@@ -464,8 +467,30 @@ else:
                     st.rerun()
 
         st.markdown("---")
-        col_a, col_b = st.columns(2)
+        col_a, col_b, col_c = st.columns(3)
         with col_a:
+            if st.button("← Go back"):
+                # Step back one level
+                if st.session_state.tree_mode:
+                    st.session_state.tree_mode = None
+                    st.session_state.analysis_ran = False
+                elif st.session_state.tree_subsub:
+                    st.session_state.tree_subsub = None
+                    st.session_state.skill_id = None
+                    st.session_state.skill_name = None
+                elif st.session_state.tree_sub:
+                    st.session_state.tree_sub = None
+                    st.session_state.skill_id = None
+                    st.session_state.skill_name = None
+                elif st.session_state.tree_goal:
+                    st.session_state.tree_goal = None
+                elif st.session_state.tree_scale:
+                    st.session_state.tree_scale = None
+                    st.session_state.selected_building = None
+                    st.session_state.selected_cluster = []
+                st.session_state.chat_history = []
+                st.rerun()
+        with col_b:
             if st.button("↺ Start over"):
                 for k in ["tree_scale","tree_goal","tree_sub","tree_subsub",
                           "tree_mode","skill_id","skill_name","analysis_ran",
@@ -473,7 +498,7 @@ else:
                     st.session_state[k] = None if k != "selected_cluster" else []
                 st.session_state.chat_history = []
                 st.rerun()
-        with col_b:
+        with col_c:
             if st.button("↩ New project"):
                 for k in ["cea_data","tree_scale","tree_goal","tree_sub","tree_subsub",
                           "tree_mode","skill_id","skill_name","analysis_ran",
@@ -483,7 +508,9 @@ else:
                 st.session_state.chat_history = []
                 st.rerun()
 
-    with col_right:
+    # ── Analysis section (full width, below tree) ──────────────────────────────
+    st.markdown("---")
+    with st.container():
         st.markdown("### Analysis")
 
         if st.session_state.analysis_ran and st.session_state.skill_id and not st.session_state.chat_history:
