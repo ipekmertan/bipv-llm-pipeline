@@ -242,7 +242,7 @@ in high-density cities in Southeast Asia. Journal of Physics: Conference Series,
         """)
 
     # Hide button
-    if st.button("Hide parameter check", key="hide_param"):
+    if st.button("Hide parameter check ↑", key="hide_param"):
         st.session_state.param_check_hidden = True
         st.rerun()
 
@@ -305,9 +305,14 @@ if st.session_state.cea_data is None:
 
 # ── Analysis screen ────────────────────────────────────────────────────────────
 else:
-    # Parameter check (unless hidden)
-    if not st.session_state.param_check_hidden and st.session_state.threshold_result:
-        render_threshold_check(st.session_state.threshold_result)
+    # Parameter check — toggle
+    if st.session_state.threshold_result:
+        if st.session_state.param_check_hidden:
+            if st.button("Parameter check ↓", key="expand_param"):
+                st.session_state.param_check_hidden = False
+                st.rerun()
+        else:
+            render_threshold_check(st.session_state.threshold_result)
 
     col_left, col_right = st.columns([1, 1], gap="large")
 
