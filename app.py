@@ -225,7 +225,7 @@ else:
         st.caption("Loaded: " + " · ".join(f"✓ {s}" for s in sims))
 
         # ── Interactive tree ───────────────────────────────────────────────────
-        st.components.v1.html(f"""
+        st.html(f"""
 <style>
 *{{box-sizing:border-box;margin:0;padding:0;font-family:'DM Sans',system-ui,sans-serif;}}
 body{{background:transparent;padding:4px 0 12px;}}
@@ -361,7 +361,7 @@ function doRun(){{
     '&mode='+encodeURIComponent(S.mode);
 }}
 </script>
-""", height=500, scrolling=False)
+""")
 
         # Handle query params from tree
         qp = st.query_params
@@ -416,3 +416,4 @@ function doRun(){{
                     response = call_llm(system_prompt, st.session_state.chat_history)
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
                 st.rerun()
+
