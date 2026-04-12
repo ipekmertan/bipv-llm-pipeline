@@ -11,6 +11,32 @@ import sys
 sys.path.append(str(Path(__file__).parent / "scripts"))
 from threshold_module import get_threshold_check, THRESHOLD_RELEVANT_SKILLS
 
+# Map each skill to the simulations whose parameters need checking
+SKILL_SIMULATION_MAP = {
+    # Solar Irradiation only
+    "site-potential--solar-availability--surface-irradiation": ["solar_irradiation"],
+    "site-potential--solar-availability--temporal-availability--seasonal-patterns": ["solar_irradiation"],
+    "site-potential--solar-availability--temporal-availability--daily-patterns": ["solar_irradiation"],
+    "site-potential--envelope-suitability": ["solar_irradiation"],
+    "site-potential--massing-and-shading-strategy": ["solar_irradiation"],
+    # PV Yield only
+    "performance-estimation--energy-generation": ["pv"],
+    "optimize-my-design--panel-type-tradeoff": ["pv"],
+    "optimize-my-design--surface-prioritization": ["pv"],
+    "optimize-my-design--envelope-simplification": ["pv"],
+    "optimize-my-design--construction-and-integration": ["pv"],
+    # PV + Demand
+    "performance-estimation--self-sufficiency": ["pv", "demand"],
+    "impact-and-viability--carbon-impact--operational-carbon-footprint": ["pv", "demand"],
+    "impact-and-viability--carbon-impact--carbon-payback": ["pv", "demand"],
+    "impact-and-viability--economic-viability--cost-analysis": ["pv", "demand"],
+    "impact-and-viability--economic-viability--investment-payback": ["pv", "demand"],
+    # No parameter check
+    "site-potential--contextual-feasibility--infrastructure-readiness": [],
+    "site-potential--contextual-feasibility--regulatory-constraints": [],
+    "site-potential--contextual-feasibility--basic-economic-signal": [],
+}
+
 st.set_page_config(page_title="BIPV Analyst", page_icon="☀️", layout="wide")
 
 st.markdown("""
@@ -175,91 +201,137 @@ Output mode: {output_mode} | Scale: {scale}{building_context}
 
 Follow the skill spec for the chosen output mode and scale. Use actual numbers from the data. Plain language for a design presentation. If a file is missing, say which CEA simulation needs to be run."""
 
-def render_threshold_check(threshold_result):
+def render_parameter_check(threshold_result, skill_id):
+    """Render parameter check contextually for the selected skill."""
     if not threshold_result or threshold_result.get("error"):
+        return
+
+    simulations = SKILL_SIMULATION_MAP.get(skill_id, None)
+
+    # No parameter check applicable
+    if simulations is not None and len(simulations) == 0:
+        st.markdown(
+            '<div style="background:#f5f5f5;border:1px solid #e0e0e0;border-radius:8px;'
+            'padding:10px 14px;font-size:12.5px;color:#888;margin-bottom:12px;">'
+            'No parameter check needed for this analysis.</div>',
+            unsafe_allow_html=True
+        )
         return
 
     city = threshold_result["location"]["city"]
     country = threshold_result["country"]
     em_grid = threshold_result["em_grid"]
     recommended = threshold_result["recommended_threshold"]
+    cea_default = threshold_result["cea_threshold"]
+    match = threshold_result["match"]
 
-    # Each parameter row: (simulations, parameter_name, recommended_value, info_text, reasoning_text, row_key)
-    rows = [
-        (
-            ["Renewable Energy Potential Assessment", "→ Photovoltaic (PV) Panels"],
-            "annual-radiation-threshold",
-            f"{int(recommended)} kWh/m²/year",
-            f"For **{city}, {country}** (grid: {em_grid} kgCO₂/kWh), the radiation threshold should be set to **{int(recommended)} kWh/m²/year**",
-            (
-                f"The radiation threshold is calculated using <strong>Happle et al. (2019)</strong> — "
-                f"the threshold is the irradiation level at which BIPV electricity carbon emissions "
-                f"equal the local grid intensity. For <strong>{country}</strong> "
-                f"(grid: <strong>{em_grid} kgCO&#x2082;/kWh</strong>), a cleaner grid means only "
-                f"high-irradiation surfaces are carbon-competitive. "
-                f"CEA's default of 800 kWh/m&sup2;/year was designed for carbon-intensive grids like Southeast Asia."
-                f"<br><span style='font-size:11px;color:#aaa;margin-top:6px;display:block;font-style:italic;'>"
-                f"Happle, G. et al. (2019). J. Phys.: Conf. Ser. 1343, 012077.</span>"
-            ),
-            "row_0"
-        ),
-    ]
+    # Build parameter rows based on which simulations this skill uses
+    rows = []
 
-    st.markdown("---")
-    st.markdown("### Parameter check")
-    with st.expander("View details", expanded=True):
+    if simulations is None or "pv" in simulations or "solar_irradiation" in simulations:
+        if "pv" in (simulations or []) or simulations is None:
+            status = "correct" if match else "wrong"
+            tooltip = "✓ Looks correct" if match else "Seems incorrect — please update in CEA"
+        else:
+            status = "unverifiable"
+            tooltip = "Cannot verify — check this value in CEA"
 
-        # Header row
-        h1, h2, h3, h4 = st.columns([2, 2, 2, 4])
-        with h1:
-            st.markdown('<p style="font-size:11px;font-weight:600;color:#888;letter-spacing:0.08em;text-transform:uppercase;margin:0;">Simulation</p>', unsafe_allow_html=True)
-        with h2:
-            st.markdown('<p style="font-size:11px;font-weight:600;color:#888;letter-spacing:0.08em;text-transform:uppercase;margin:0;">Parameter</p>', unsafe_allow_html=True)
-        with h3:
-            st.markdown('<p style="font-size:11px;font-weight:600;color:#888;letter-spacing:0.08em;text-transform:uppercase;margin:0;">Recommended value</p>', unsafe_allow_html=True)
-        with h4:
-            st.markdown('<p style="font-size:11px;font-weight:600;color:#888;letter-spacing:0.08em;text-transform:uppercase;margin:0;">Info</p>', unsafe_allow_html=True)
-        st.markdown('<hr style="margin:4px 0 8px 0;border:none;border-top:1.5px solid #e0e0e0;">', unsafe_allow_html=True)
+        rows.append({
+            "simulation": "Renewable Energy Potential Assessment<br>→ Photovoltaic (PV) Panels",
+            "parameter": "annual-radiation-threshold",
+            "recommended": f"{int(recommended)} kWh/m²/year",
+            "tooltip": tooltip,
+            "status": status,
+            "key": "row_pv_threshold"
+        })
 
-        # Data rows
-        for sims, param, value, info, reasoning, key in rows:
-            c1, c2, c3, c4 = st.columns([2, 2, 2, 4])
-            with c1:
-                st.markdown("\n".join(sims))
-            with c2:
-                st.markdown(f"`{param}`")
-            with c3:
-                st.markdown(f"**{value}**")
-                # Copy button via HTML
-                st.markdown(
-                    f'<button onclick="navigator.clipboard.writeText(\'{int(recommended)}\')" '
-                    f'style="padding:3px 10px;border:1px solid #ddd;border-radius:5px;'
-                    f'background:white;cursor:pointer;font-size:11px;color:#555;margin-top:4px;">copy</button>',
-                    unsafe_allow_html=True
-                )
-            with c4:
-                st.markdown(info)
-                if st.button("Reasoning →" if not st.session_state.get(f"reasoning_{key}") else "Reasoning ↑",
-                             key=f"btn_{key}"):
-                    current = st.session_state.get(f"reasoning_{key}", False)
-                    st.session_state[f"reasoning_{key}"] = not current
-                    st.rerun()
-                if st.session_state.get(f"reasoning_{key}"):
-                    st.markdown(
-                        f'<div style="background:#f7f7f7;border:1px solid #e8e8e8;border-radius:8px;'
-                        f'padding:12px 14px;margin-top:8px;font-size:12px;color:#555;line-height:1.65;">{reasoning}</div>',
-                        unsafe_allow_html=True
-                    )
-
-            st.markdown('<hr style="margin:4px 0;border:none;border-top:1px solid #f0f0f0;">', unsafe_allow_html=True)
-
+    if not rows:
         st.markdown(
-            '<div style="background:#fff8e1;color:#7c5e00;border:1px solid #ffe082;'
-            'border-radius:8px;padding:10px 14px;font-size:12.5px;margin-top:8px;">'
-            "⚠ If your simulation used a different threshold, please correct it in CEA, "
-            "click 'Save settings', rerun the simulation, and re-upload the updated zip.</div>",
+            '<div style="background:#f0fff4;border:1px solid #b2dfdb;border-radius:8px;'
+            'padding:10px 14px;font-size:12.5px;color:#2e7d52;margin-bottom:12px;">'
+            '✓ All parameter inputs look correct for this analysis.</div>',
             unsafe_allow_html=True
         )
+        return
+
+    # Check if all correct
+    all_correct = all(r["status"] == "correct" for r in rows)
+    if all_correct:
+        st.markdown(
+            '<div style="background:#f0fff4;border:1px solid #b2dfdb;border-radius:8px;'
+            'padding:10px 14px;font-size:12.5px;color:#2e7d52;margin-bottom:12px;">'
+            '✓ All parameter inputs look correct for this analysis.</div>',
+            unsafe_allow_html=True
+        )
+        return
+
+    # Show table
+    st.markdown("**Parameter check**")
+
+    # Header
+    h1, h2, h3, h4 = st.columns([2.5, 2, 2, 4])
+    for col, label in zip([h1, h2, h3, h4], ["Simulation", "Parameter", "Recommended value", "Info"]):
+        with col:
+            st.markdown(
+                f'<p style="font-size:11px;font-weight:600;color:#888;letter-spacing:0.08em;'
+                f'text-transform:uppercase;margin:0;">{label}</p>',
+                unsafe_allow_html=True
+            )
+    st.markdown('<hr style="margin:4px 0 8px 0;border:none;border-top:1.5px solid #e0e0e0;">', unsafe_allow_html=True)
+
+    for row in rows:
+        c1, c2, c3, c4 = st.columns([2.5, 2, 2, 4])
+        with c1:
+            st.markdown(row["simulation"], unsafe_allow_html=True)
+        with c2:
+            st.markdown(f'`{row["parameter"]}`')
+        with c3:
+            st.markdown(
+                f'<div style="background:#e3f2fd;border:1px solid #90caf9;border-radius:6px;'
+                f'padding:6px 10px;font-weight:600;font-size:13px;cursor:help;" '
+                f'title="{row["tooltip"]}">'
+                f'{row["recommended"]}</div>',
+                unsafe_allow_html=True
+            )
+        with c4:
+            st.markdown(
+                f'For <strong>{city}, {country}</strong> (grid: {em_grid} kgCO₂/kWh), '
+                f'the radiation threshold should be set to <strong>{int(recommended)} kWh/m²/year</strong>'
+            )
+            if st.button(
+                "Reasoning →" if not st.session_state.get(f"reasoning_{row['key']}") else "Reasoning ↑",
+                key=f"btn_{row['key']}"
+            ):
+                k = f"reasoning_{row['key']}"
+                st.session_state[k] = not st.session_state.get(k, False)
+                st.rerun()
+
+            if st.session_state.get(f"reasoning_{row['key']}"):
+                st.markdown(
+                    f'<div style="background:#f7f7f7;border:1px solid #e8e8e8;border-radius:8px;'
+                    f'padding:12px 14px;margin-top:8px;font-size:12px;color:#555;line-height:1.65;">'
+                    f'The radiation threshold is calculated using <strong>Happle et al. (2019)</strong> — '
+                    f'the threshold is the irradiation level at which BIPV electricity carbon emissions '
+                    f'equal the local grid intensity. For <strong>{country}</strong> '
+                    f'(grid: <strong>{em_grid} kgCO&#x2082;/kWh</strong>), a cleaner grid means only '
+                    f'high-irradiation surfaces are carbon-competitive. '
+                    f"CEA's default of 800 kWh/m&sup2;/year was designed for carbon-intensive grids like Southeast Asia."
+                    f'<br><span style="font-size:11px;color:#aaa;margin-top:6px;display:block;font-style:italic;">'
+                    f'Happle, G. et al. (2019). J. Phys.: Conf. Ser. 1343, 012077.</span>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+
+        st.markdown('<hr style="margin:4px 0;border:none;border-top:1px solid #f0f0f0;">', unsafe_allow_html=True)
+
+    st.markdown(
+        '<div style="background:#fff8e1;color:#7c5e00;border:1px solid #ffe082;'
+        'border-radius:8px;padding:10px 14px;font-size:12.5px;margin-top:4px;">'
+        "⚠ If your simulation used a different threshold, please correct it in CEA, "
+        "click 'Save settings', rerun the simulation, and re-upload the updated zip.</div>",
+        unsafe_allow_html=True
+    )
+    st.markdown("")
 
 
 # ── Session state ──────────────────────────────────────────────────────────────
@@ -320,9 +392,7 @@ if st.session_state.cea_data is None:
 
 # ── Analysis screen ────────────────────────────────────────────────────────────
 else:
-    # Parameter check — expander
-    if st.session_state.threshold_result:
-        render_threshold_check(st.session_state.threshold_result)
+
 
     # ── Tree section (full width) ──────────────────────────────────────────────
     with st.container():
@@ -552,6 +622,8 @@ else:
         if not st.session_state.chat_history:
             st.markdown('<div class="info-box">← Complete the steps on the left to run an analysis.</div>',
                        unsafe_allow_html=True)
+        elif st.session_state.skill_id and st.session_state.threshold_result:
+            render_parameter_check(st.session_state.threshold_result, st.session_state.skill_id)
 
         for i, msg in enumerate(st.session_state.chat_history):
             if msg["role"] == "user" and i == 0:
