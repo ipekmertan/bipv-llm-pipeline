@@ -257,30 +257,27 @@ def build_data_summary(cea_data: dict) -> str:
 
     return "\n".join(lines)
 
-
 def call_claude(system_prompt: str, messages: list) -> str:
-    api_key = st.secrets.get("ANTHROPIC_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
+    api_key = st.secrets.get("OPENAI_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
     headers = {
-        "x-api-key": api_key,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
     }
     body = {
-        "model": "claude-sonnet-4-20250514",
+        "model": "gpt-4o",
         "max_tokens": 1500,
-        "system": system_prompt,
-        "messages": messages,
+        "messages": [{"role": "system", "content": system_prompt}] + messages,
     }
     try:
         resp = requests.post(
-            "https://api.anthropic.com/v1/messages",
+            "https://api.openai.com/v1/chat/completions",
             headers=headers,
             json=body,
             timeout=60,
         )
         resp.raise_for_status()
         data = resp.json()
-        return "\n".join(b["text"] for b in data.get("content", []) if b.get("type") == "text")
+        return data["choices"][0]["message"]["content"]
     except Exception as e:
         return f"⚠️ API error: {e}"
 
