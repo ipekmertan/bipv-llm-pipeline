@@ -26,6 +26,7 @@ h1, h2, h3 { font-family: 'DM Serif Display', serif; }
 .param-box-green { background:#f0fff4;border:1px solid #b2dfdb;border-radius:8px;padding:14px 16px;font-size:13px;color:#444;line-height:1.5; }
 .param-warning { background:#c0392b;color:white;border-radius:8px;padding:14px 16px;font-size:13px;line-height:1.6;margin-top:8px; }
 .param-ok { background:#f0fff4;border:1px solid #b2dfdb;border-radius:8px;padding:14px 16px;font-size:13px;color:#2e7d52;margin-top:8px; }
+.cluster-counter { background:#f8f7f4;border:1px solid #e0dcd4;border-radius:8px;padding:8px 14px;font-size:13px;color:#444;margin-bottom:8px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -43,6 +44,17 @@ def load_skill_md(skill_id):
             md = folder / "SKILL.md"
             if md.exists(): return md.read_text()
     return ""
+
+def get_building_names(cea_data):
+    """Extract building names from irradiation buildings file."""
+    df = cea_data["files"].get("solar_irradiation_annually_buildings.csv")
+    if df is not None and "name" in df.columns:
+        return sorted(df["name"].tolist())
+    # fallback: try PV buildings file
+    df = cea_data["files"].get("PV_PV1_total_buildings.csv")
+    if df is not None and "name" in df.columns:
+        return sorted(df["name"].tolist())
+    return []
 
 def extract_cea_zip(uploaded_file):
     result = {"files": {}, "available_simulations": [], "errors": []}
@@ -112,18 +124,25 @@ def extract_cea_zip(uploaded_file):
         result["available_simulations"] = sims
     return result
 
-def build_data_summary(cea_data):
+def build_data_summary(cea_data, selected_buildings=None, scale="District"):
     lines = []
     if "weather_header" in cea_data["files"]:
         lines.append(f"## Location\n{cea_data['files']['weather_header']}\n")
     lines.append(f"## Available simulations\n{', '.join(cea_data['available_simulations'])}\n")
+    lines.append(f"## Analysis scale\n{scale}\n")
+    if selected_buildings:
+        lines.append(f"## Selected buildings\n{', '.join(selected_buildings)}\n")
+
     for fname in ["solar_irradiation_annually.csv","solar_irradiation_annually_buildings.csv",
                   "solar_irradiation_seasonally.csv","demand_annually.csv",
                   "PV_PV1_total.csv","PV_PV2_total.csv","PV_PV3_total.csv","PV_PV4_total.csv",
                   "PHOTOVOLTAIC_PANELS.csv","GRID.csv","Total_demand.csv"]:
         df = cea_data["files"].get(fname)
         if df is not None:
-            lines.append(f"### {fname}\n{df.shape[0]}x{df.shape[1]}\n{', '.join(df.columns)}\n{df.head(5).to_csv(index=False)}")
+            # Filter to selected buildings if applicable
+            if selected_buildings and "name" in df.columns:
+                df = df[df["name"].isin(selected_buildings)]
+            lines.append(f"### {fname}\n{df.shape[0]}x{df.shape[1]}\n{', '.join(df.columns)}\n{df.head(10).to_csv(index=False)}")
     return "\n".join(lines)
 
 def call_llm(system_prompt, messages):
@@ -141,9 +160,12 @@ def call_llm(system_prompt, messages):
     except Exception as e:
         return f"⚠️ API error: {e}"
 
-def build_system_prompt(skill_md, cea_summary, output_mode, scale):
+def build_system_prompt(skill_md, cea_summary, output_mode, scale, selected_buildings=None):
+    building_context = ""
+    if selected_buildings:
+        building_context = f"\nFocus your analysis specifically on: {', '.join(selected_buildings)}."
     return f"""You are a BIPV expert helping architects interpret CEA4 simulation results.
-Output mode: {output_mode} | Scale: {scale}
+Output mode: {output_mode} | Scale: {scale}{building_context}
 
 ## Skill specification
 {skill_md}
@@ -153,9 +175,8 @@ Output mode: {output_mode} | Scale: {scale}
 
 Follow the skill spec for the chosen output mode and scale. Use actual numbers from the data. Plain language for a design presentation. If a file is missing, say which CEA simulation needs to be run."""
 
-def render_threshold_check(threshold_result, skill_id=None):
-    """Render the parameter check UI boxes."""
-    if threshold_result.get("error"):
+def render_threshold_check(threshold_result):
+    if not threshold_result or threshold_result.get("error"):
         return
 
     city = threshold_result["location"]["city"]
@@ -164,10 +185,6 @@ def render_threshold_check(threshold_result, skill_id=None):
     recommended = threshold_result["recommended_threshold"]
     cea_threshold = threshold_result["cea_threshold"]
     match = threshold_result["match"]
-
-    # Only show if this skill uses the threshold (or no skill specified = show always after upload)
-    if skill_id and skill_id not in THRESHOLD_RELEVANT_SKILLS:
-        return
 
     st.markdown("---")
     st.markdown("**Parameter check**")
@@ -202,12 +219,43 @@ def render_threshold_check(threshold_result, skill_id=None):
             unsafe_allow_html=True
         )
 
+    # Reasoning expander
+    with st.expander("Reasoning"):
+        st.markdown(f"""
+The radiation threshold determines which building surfaces are included in BIPV analysis.
+It is calculated using the method from **Happle et al. (2019)** — the threshold is the irradiation
+level at which the carbon emissions of BIPV electricity equal those of the local grid.
+
+The formula is:
+
+> **I_threshold = EmBIPV ÷ (em_grid × η × PR × A × LT)**
+
+For **{country}**, the grid carbon intensity is **{em_grid} kgCO₂/kWh**.
+A cleaner grid means BIPV electricity needs to come from higher-irradiation surfaces to be
+carbon-competitive — hence the higher threshold of **{int(recommended)} kWh/m²/year**.
+
+CEA's default of 800 kWh/m²/year was designed for carbon-intensive grids (e.g. Southeast Asia).
+For {country}'s clean grid, a higher threshold is more appropriate.
+
+*Source: Happle, G. et al. (2019). Identifying carbon emission reduction potentials of BIPV
+in high-density cities in Southeast Asia. Journal of Physics: Conference Series, 1343, 012077.*
+        """)
+
+    # Hide button
+    if st.button("Hide parameter check", key="hide_param"):
+        st.session_state.param_check_hidden = True
+        st.rerun()
+
+    st.markdown("---")
+
 # ── Session state ──────────────────────────────────────────────────────────────
 for k, v in [("cea_data", None), ("chat_history", []),
               ("tree_scale", None), ("tree_goal", None), ("tree_sub", None),
               ("tree_subsub", None), ("tree_mode", None),
               ("skill_id", None), ("skill_name", None),
-              ("analysis_ran", False), ("threshold_result", None)]:
+              ("analysis_ran", False), ("threshold_result", None),
+              ("param_check_hidden", False),
+              ("selected_building", None), ("selected_cluster", [])]:
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -248,7 +296,7 @@ if st.session_state.cea_data is None:
             st.error("No simulation files found.")
         else:
             st.session_state.cea_data = cea_data
-            # Calculate threshold immediately on upload
+            st.session_state.param_check_hidden = False
             if "weather_header" in cea_data["files"]:
                 st.session_state.threshold_result = get_threshold_check(
                     cea_data["files"]["weather_header"], cea_default=800
@@ -257,10 +305,9 @@ if st.session_state.cea_data is None:
 
 # ── Analysis screen ────────────────────────────────────────────────────────────
 else:
-    # ── Show threshold check right after upload, before the tree ──────────────
-    if st.session_state.threshold_result:
+    # Parameter check (unless hidden)
+    if not st.session_state.param_check_hidden and st.session_state.threshold_result:
         render_threshold_check(st.session_state.threshold_result)
-        st.markdown("")
 
     col_left, col_right = st.columns([1, 1], gap="large")
 
@@ -283,7 +330,42 @@ else:
                     st.session_state.tree_subsub = None
                     st.session_state.tree_mode = None
                     st.session_state.analysis_ran = False
+                    st.session_state.selected_building = None
+                    st.session_state.selected_cluster = []
                     st.rerun()
+
+        # Building / Cluster selector
+        if st.session_state.tree_scale in ["Building", "Cluster"]:
+            building_names = get_building_names(st.session_state.cea_data)
+            if building_names:
+                st.markdown("")
+                if st.session_state.tree_scale == "Building":
+                    st.markdown("**Select building**")
+                    chosen = st.selectbox(
+                        "Building",
+                        building_names,
+                        index=building_names.index(st.session_state.selected_building)
+                        if st.session_state.selected_building in building_names else 0,
+                        label_visibility="collapsed",
+                        key="building_selector"
+                    )
+                    st.session_state.selected_building = chosen
+
+                elif st.session_state.tree_scale == "Cluster":
+                    n = len(st.session_state.selected_cluster)
+                    st.markdown(
+                        f'<div class="cluster-counter">{"No buildings selected yet" if n == 0 else f"{n} building{"s" if n > 1 else ""} selected"}</div>',
+                        unsafe_allow_html=True
+                    )
+                    st.markdown("**Select buildings for cluster**")
+                    chosen = st.multiselect(
+                        "Buildings",
+                        building_names,
+                        default=st.session_state.selected_cluster,
+                        label_visibility="collapsed",
+                        key="cluster_selector"
+                    )
+                    st.session_state.selected_cluster = chosen
 
         # Step 2: Goal
         if st.session_state.tree_scale:
@@ -359,26 +441,40 @@ else:
 
         # Run button
         if st.session_state.tree_mode and st.session_state.skill_id and not st.session_state.analysis_ran:
-            st.markdown("")
-            if st.button("▶ Run analysis", type="primary"):
-                st.session_state.chat_history = []
-                st.session_state.analysis_ran = True
-                st.rerun()
+            # Validate building/cluster selection
+            scale = st.session_state.tree_scale
+            ready_to_run = True
+            if scale == "Building" and not st.session_state.selected_building:
+                st.warning("Please select a building above.")
+                ready_to_run = False
+            if scale == "Cluster" and len(st.session_state.selected_cluster) == 0:
+                st.warning("Please select at least one building for the cluster.")
+                ready_to_run = False
+
+            if ready_to_run:
+                st.markdown("")
+                if st.button("▶ Run analysis", type="primary"):
+                    st.session_state.chat_history = []
+                    st.session_state.analysis_ran = True
+                    st.rerun()
 
         st.markdown("---")
         col_a, col_b = st.columns(2)
         with col_a:
             if st.button("↺ Start over"):
                 for k in ["tree_scale","tree_goal","tree_sub","tree_subsub",
-                          "tree_mode","skill_id","skill_name","analysis_ran"]:
-                    st.session_state[k] = None
+                          "tree_mode","skill_id","skill_name","analysis_ran",
+                          "selected_building","selected_cluster"]:
+                    st.session_state[k] = None if k != "selected_cluster" else []
                 st.session_state.chat_history = []
                 st.rerun()
         with col_b:
             if st.button("↩ New project"):
                 for k in ["cea_data","tree_scale","tree_goal","tree_sub","tree_subsub",
-                          "tree_mode","skill_id","skill_name","analysis_ran","threshold_result"]:
-                    st.session_state[k] = None
+                          "tree_mode","skill_id","skill_name","analysis_ran",
+                          "threshold_result","param_check_hidden",
+                          "selected_building","selected_cluster"]:
+                    st.session_state[k] = None if k != "selected_cluster" else []
                 st.session_state.chat_history = []
                 st.rerun()
 
@@ -386,16 +482,29 @@ else:
         st.markdown("### Analysis")
 
         if st.session_state.analysis_ran and st.session_state.skill_id and not st.session_state.chat_history:
+            scale = st.session_state.tree_scale
+            selected_buildings = None
+            if scale == "Building" and st.session_state.selected_building:
+                selected_buildings = [st.session_state.selected_building]
+            elif scale == "Cluster" and st.session_state.selected_cluster:
+                selected_buildings = st.session_state.selected_cluster
+
             skill_md = load_skill_md(st.session_state.skill_id)
-            cea_summary = build_data_summary(st.session_state.cea_data)
+            cea_summary = build_data_summary(
+                st.session_state.cea_data,
+                selected_buildings=selected_buildings,
+                scale=scale
+            )
             system_prompt = build_system_prompt(
                 skill_md, cea_summary,
                 st.session_state.tree_mode,
-                st.session_state.tree_scale
+                scale,
+                selected_buildings=selected_buildings
             )
             user_msg = (f"Run the **{st.session_state.skill_name}** analysis at "
-                       f"**{st.session_state.tree_scale}** scale in "
-                       f"**{st.session_state.tree_mode}** mode. Use only the data provided.")
+                       f"**{scale}** scale in **{st.session_state.tree_mode}** mode."
+                       + (f" Focus on buildings: {', '.join(selected_buildings)}." if selected_buildings else "")
+                       + " Use only the data provided.")
             st.session_state.chat_history.append({"role": "user", "content": user_msg})
             with st.spinner("Analysing…"):
                 response = call_llm(system_prompt, st.session_state.chat_history)
@@ -408,7 +517,7 @@ else:
 
         for i, msg in enumerate(st.session_state.chat_history):
             if msg["role"] == "user" and i == 0:
-                pass  # hide the initial trigger prompt
+                pass  # hide initial trigger
             elif msg["role"] == "user":
                 st.markdown(f'<div class="bubble-user">{msg["content"]}</div><div class="clearfix"></div>',
                            unsafe_allow_html=True)
@@ -421,12 +530,24 @@ else:
             followup = st.text_input("Ask a follow-up…", key="fu",
                                     placeholder="e.g. Which building has the best south facade?")
             if st.button("Send") and followup.strip():
+                scale = st.session_state.tree_scale
+                selected_buildings = None
+                if scale == "Building" and st.session_state.selected_building:
+                    selected_buildings = [st.session_state.selected_building]
+                elif scale == "Cluster" and st.session_state.selected_cluster:
+                    selected_buildings = st.session_state.selected_cluster
+
                 skill_md = load_skill_md(st.session_state.skill_id or "")
-                cea_summary = build_data_summary(st.session_state.cea_data)
+                cea_summary = build_data_summary(
+                    st.session_state.cea_data,
+                    selected_buildings=selected_buildings,
+                    scale=scale or ""
+                )
                 system_prompt = build_system_prompt(
                     skill_md, cea_summary,
                     st.session_state.tree_mode or "",
-                    st.session_state.tree_scale or ""
+                    scale or "",
+                    selected_buildings=selected_buildings
                 )
                 st.session_state.chat_history.append({"role": "user", "content": followup})
                 with st.spinner("Thinking…"):
