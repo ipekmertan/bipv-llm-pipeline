@@ -185,112 +185,62 @@ def render_threshold_check(threshold_result):
     recommended = threshold_result["recommended_threshold"]
 
     st.markdown("---")
-    with st.expander("Parameter check", expanded=True):
+    st.markdown("### Parameter check")
+    with st.expander("View details", expanded=True):
 
-        # Reasoning bubble (shown above table when open)
-        if st.session_state.reasoning_open:
-            _, bubble_col, _ = st.columns([1, 2, 1])
-            with bubble_col:
-                st.markdown(f"""
-<div style="background:white;border:1px solid #e0e0e0;border-radius:12px;
-padding:20px 22px;box-shadow:0 4px 20px rgba(0,0,0,0.08);margin-bottom:16px;font-size:13px;line-height:1.7;color:#333;">
-<p style="font-size:13px;margin:0 0 12px 0;">
-The radiation threshold determines which surfaces are included in BIPV analysis.
-It is calculated using the method from <strong>Happle et al. (2019)</strong> — the threshold is the
-irradiation level at which BIPV electricity carbon emissions equal the local grid intensity.
-</p>
-<p style="font-size:13px;margin:0 0 12px 0;">
-<strong>Formula:</strong><br>
-<code style="background:#f5f5f5;padding:4px 8px;border-radius:4px;font-size:12px;">
-I_threshold = EmBIPV ÷ (em_grid × η × PR × A × LT)
-</code>
-</p>
-<p style="font-size:13px;margin:0 0 12px 0;">
-For <strong>{country}</strong> (grid: <strong>{em_grid} kgCO₂/kWh</strong>), a cleaner grid means
-BIPV needs higher-irradiation surfaces to be carbon-competitive — hence the threshold of
-<strong>{int(recommended)} kWh/m²/year</strong>. CEA's default of 800 kWh/m²/year was designed
-for carbon-intensive grids like Southeast Asia.
-</p>
-<p style="font-size:11px;color:#999;margin:0;">
-Happle, G. et al. (2019). J. Phys.: Conf. Ser. 1343, 012077.
-</p>
-</div>
-""", unsafe_allow_html=True)
-                if st.button("✕  Close", key="close_reasoning"):
-                    st.session_state.reasoning_open = False
-                    st.rerun()
+        reasoning_html = (
+            f'<p style="font-size:12px;color:#666;margin:10px 0 0 0;line-height:1.6;">'
+            f'The radiation threshold is calculated using <strong>Happle et al. (2019)</strong> — '
+            f'the threshold is the irradiation level at which BIPV electricity carbon emissions '
+            f'equal the local grid intensity. For <strong>{country}</strong> '
+            f'(grid: <strong>{em_grid} kgCO&#x2082;/kWh</strong>), a cleaner grid means only '
+            f'high-irradiation surfaces are carbon-competitive. '
+            f"CEA's default of 800 kWh/m&sup2;/year was designed for carbon-intensive grids like Southeast Asia.<br>"
+            f'<span style="font-size:11px;color:#aaa;">Happle, G. et al. (2019). J. Phys.: Conf. Ser. 1343, 012077.</span>'
+            f'</p>'
+        ) if st.session_state.reasoning_open else ""
 
-        table_html = f"""
-<table style="width:100%;border-collapse:collapse;font-size:13px;font-family:Inter,sans-serif;">
-  <thead>
-    <tr style="border-bottom:1.5px solid #e0e0e0;">
-      <th style="text-align:left;padding:10px 14px;font-weight:600;color:#888;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;width:18%;">Simulation</th>
-      <th style="text-align:left;padding:10px 14px;font-weight:600;color:#888;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;width:18%;">Parameter</th>
-      <th style="text-align:left;padding:10px 14px;font-weight:600;color:#888;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;width:44%;">Info</th>
-      <th style="text-align:left;padding:10px 14px;font-weight:600;color:#888;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;width:20%;">Recommended value</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr style="border-bottom:1px solid #f0f0f0;">
-      <td style="padding:12px 14px;color:#333;vertical-align:top;">Solar Irradiation<br>PV Yield<br>PVT Yield</td>
-      <td style="padding:12px 14px;color:#333;vertical-align:top;">annual-radiation-threshold</td>
-      <td style="padding:12px 14px;color:#444;line-height:1.6;vertical-align:top;">
-        For <strong>{city}, {country}</strong> (grid: {em_grid} kgCO₂/kWh), the radiation threshold should be set to <strong>{int(recommended)} kWh/m²/year</strong>
-      </td>
-      <td style="padding:12px 14px;vertical-align:top;">
-        <span style="font-weight:600;color:#1a1a1a;">{int(recommended)} kWh/m²/year</span>
-        <button onclick="navigator.clipboard.writeText('{int(recommended)}')"
-          style="margin-left:8px;padding:3px 8px;border:1px solid #ddd;border-radius:5px;
-          background:white;cursor:pointer;font-size:11px;color:#555;">copy</button>
-      </td>
-    </tr>
-  </tbody>
-</table>
-"""
-        st.markdown(table_html, unsafe_allow_html=True)
+        reasoning_btn = "Reasoning ↑" if st.session_state.reasoning_open else "Reasoning →"
+
+        table = (
+            '<table style="width:100%;border-collapse:collapse;font-size:13px;font-family:Inter,sans-serif;">'
+            '<thead><tr style="border-bottom:1.5px solid #e0e0e0;">'
+            '<th style="text-align:left;padding:10px 14px;font-weight:600;color:#888;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;width:18%;">Simulation</th>'
+            '<th style="text-align:left;padding:10px 14px;font-weight:600;color:#888;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;width:18%;">Parameter</th>'
+            '<th style="text-align:left;padding:10px 14px;font-weight:600;color:#888;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;width:44%;">Info</th>'
+            '<th style="text-align:left;padding:10px 14px;font-weight:600;color:#888;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;width:20%;">Recommended value</th>'
+            '</tr></thead><tbody>'
+            '<tr style="border-bottom:1px solid #f0f0f0;">'
+            '<td style="padding:12px 14px;color:#333;vertical-align:top;">Solar Irradiation<br>PV Yield<br>PVT Yield</td>'
+            '<td style="padding:12px 14px;color:#333;vertical-align:top;">annual-radiation-threshold</td>'
+            f'<td style="padding:12px 14px;color:#444;line-height:1.6;vertical-align:top;">'
+            f'For <strong>{city}, {country}</strong> (grid: {em_grid} kgCO&#x2082;/kWh), '
+            f'the radiation threshold should be set to <strong>{int(recommended)} kWh/m&sup2;/year</strong>'
+            f'{reasoning_html}'
+            f'</td>'
+            f'<td style="padding:12px 14px;vertical-align:top;">'
+            f'<span style="font-weight:600;color:#1a1a1a;">{int(recommended)} kWh/m&sup2;/year</span>'
+            f'<button onclick="navigator.clipboard.writeText(\'{int(recommended)}\')" '
+            f'style="margin-left:8px;padding:3px 8px;border:1px solid #ddd;border-radius:5px;'
+            f'background:white;cursor:pointer;font-size:11px;color:#555;">copy</button>'
+            f'</td></tr></tbody></table>'
+        )
+        st.markdown(table, unsafe_allow_html=True)
 
         col_r, _ = st.columns([1, 4])
         with col_r:
-            if not st.session_state.reasoning_open:
-                if st.button("Reasoning →", key="open_reasoning"):
-                    st.session_state.reasoning_open = True
-                    st.rerun()
+            if st.button(reasoning_btn, key="toggle_reasoning"):
+                st.session_state.reasoning_open = not st.session_state.reasoning_open
+                st.rerun()
 
-        st.markdown(
-            '<div style="background:#fff8e1;color:#7c5e00;border:1px solid #ffe082;border-radius:8px;padding:10px 14px;font-size:12.5px;margin-top:8px;">'
-            '⚠ If your simulation used a different threshold, please correct it in CEA, '
-            'click \'Save settings\', rerun the simulation, and re-upload the updated zip.</div>',
-            unsafe_allow_html=True
+        amber = (
+            '<div style="background:#fff8e1;color:#7c5e00;border:1px solid #ffe082;'
+            'border-radius:8px;padding:10px 14px;font-size:12.5px;margin-top:8px;">'
+            "⚠ If your simulation used a different threshold, please correct it in CEA, "
+            "click 'Save settings', rerun the simulation, and re-upload the updated zip.</div>"
         )
+        st.markdown(amber, unsafe_allow_html=True)
 
-    # Reasoning expander
-    with st.expander("Reasoning"):
-        st.markdown(f"""
-The radiation threshold determines which building surfaces are included in BIPV analysis.
-It is calculated using the method from **Happle et al. (2019)** — the threshold is the irradiation
-level at which the carbon emissions of BIPV electricity equal those of the local grid.
-
-The formula is:
-
-> **I_threshold = EmBIPV ÷ (em_grid × η × PR × A × LT)**
-
-For **{country}**, the grid carbon intensity is **{em_grid} kgCO₂/kWh**.
-A cleaner grid means BIPV electricity needs to come from higher-irradiation surfaces to be
-carbon-competitive — hence the higher threshold of **{int(recommended)} kWh/m²/year**.
-
-CEA's default of 800 kWh/m²/year was designed for carbon-intensive grids (e.g. Southeast Asia).
-For {country}'s clean grid, a higher threshold is more appropriate.
-
-*Source: Happle, G. et al. (2019). Identifying carbon emission reduction potentials of BIPV
-in high-density cities in Southeast Asia. Journal of Physics: Conference Series, 1343, 012077.*
-        """)
-
-    # Hide button
-    if st.button("Hide parameter check ↑", key="hide_param"):
-        st.session_state.param_check_hidden = True
-        st.rerun()
-
-    st.markdown("---")
 
 # ── Session state ──────────────────────────────────────────────────────────────
 for k, v in [("cea_data", None), ("chat_history", []),
