@@ -3,7 +3,8 @@ title: BIPV Analyst
 emoji: ☀️
 colorFrom: yellow
 colorTo: pink
-sdk: docker
+sdk: streamlit
+sdk_version: 1.35.0
 app_file: app.py
 pinned: false
 ---
