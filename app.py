@@ -185,9 +185,42 @@ def render_threshold_check(threshold_result):
     recommended = threshold_result["recommended_threshold"]
 
     st.markdown("---")
-    st.markdown("**Parameter check**")
+    with st.expander("Parameter check", expanded=True):
 
-    table_html = f"""
+        # Reasoning bubble (shown above table when open)
+        if st.session_state.reasoning_open:
+            _, bubble_col, _ = st.columns([1, 2, 1])
+            with bubble_col:
+                st.markdown(f"""
+<div style="background:white;border:1px solid #e0e0e0;border-radius:12px;
+padding:20px 22px;box-shadow:0 4px 20px rgba(0,0,0,0.08);margin-bottom:16px;font-size:13px;line-height:1.7;color:#333;">
+<p style="font-size:13px;margin:0 0 12px 0;">
+The radiation threshold determines which surfaces are included in BIPV analysis.
+It is calculated using the method from <strong>Happle et al. (2019)</strong> — the threshold is the
+irradiation level at which BIPV electricity carbon emissions equal the local grid intensity.
+</p>
+<p style="font-size:13px;margin:0 0 12px 0;">
+<strong>Formula:</strong><br>
+<code style="background:#f5f5f5;padding:4px 8px;border-radius:4px;font-size:12px;">
+I_threshold = EmBIPV ÷ (em_grid × η × PR × A × LT)
+</code>
+</p>
+<p style="font-size:13px;margin:0 0 12px 0;">
+For <strong>{country}</strong> (grid: <strong>{em_grid} kgCO₂/kWh</strong>), a cleaner grid means
+BIPV needs higher-irradiation surfaces to be carbon-competitive — hence the threshold of
+<strong>{int(recommended)} kWh/m²/year</strong>. CEA's default of 800 kWh/m²/year was designed
+for carbon-intensive grids like Southeast Asia.
+</p>
+<p style="font-size:11px;color:#999;margin:0;">
+Happle, G. et al. (2019). J. Phys.: Conf. Ser. 1343, 012077.
+</p>
+</div>
+""", unsafe_allow_html=True)
+                if st.button("✕  Close", key="close_reasoning"):
+                    st.session_state.reasoning_open = False
+                    st.rerun()
+
+        table_html = f"""
 <table style="width:100%;border-collapse:collapse;font-size:13px;font-family:Inter,sans-serif;">
   <thead>
     <tr style="border-bottom:1.5px solid #e0e0e0;">
@@ -214,14 +247,21 @@ def render_threshold_check(threshold_result):
   </tbody>
 </table>
 """
-    st.markdown(table_html, unsafe_allow_html=True)
-    st.markdown("")
-    st.markdown(
-        '<div style="background:#fff8e1;color:#7c5e00;border:1px solid #ffe082;border-radius:8px;padding:10px 14px;font-size:12.5px;margin-top:4px;">'
-        '⚠ If your simulation used a different threshold, please correct it in CEA, '
-        'click \'Save settings\', rerun the simulation, and re-upload the updated zip.</div>',
-        unsafe_allow_html=True
-    )
+        st.markdown(table_html, unsafe_allow_html=True)
+
+        col_r, _ = st.columns([1, 4])
+        with col_r:
+            if not st.session_state.reasoning_open:
+                if st.button("Reasoning →", key="open_reasoning"):
+                    st.session_state.reasoning_open = True
+                    st.rerun()
+
+        st.markdown(
+            '<div style="background:#fff8e1;color:#7c5e00;border:1px solid #ffe082;border-radius:8px;padding:10px 14px;font-size:12.5px;margin-top:8px;">'
+            '⚠ If your simulation used a different threshold, please correct it in CEA, '
+            'click \'Save settings\', rerun the simulation, and re-upload the updated zip.</div>',
+            unsafe_allow_html=True
+        )
 
     # Reasoning expander
     with st.expander("Reasoning"):
@@ -259,7 +299,8 @@ for k, v in [("cea_data", None), ("chat_history", []),
               ("skill_id", None), ("skill_name", None),
               ("analysis_ran", False), ("threshold_result", None),
               ("param_check_hidden", False),
-              ("selected_building", None), ("selected_cluster", [])]:
+              ("selected_building", None), ("selected_cluster", []),
+              ("reasoning_open", False)]:
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -309,14 +350,9 @@ if st.session_state.cea_data is None:
 
 # ── Analysis screen ────────────────────────────────────────────────────────────
 else:
-    # Parameter check — toggle
+    # Parameter check — expander
     if st.session_state.threshold_result:
-        if st.session_state.param_check_hidden:
-            if st.button("Parameter check ↓", key="expand_param"):
-                st.session_state.param_check_hidden = False
-                st.rerun()
-        else:
-            render_threshold_check(st.session_state.threshold_result)
+        render_threshold_check(st.session_state.threshold_result)
 
     # ── Tree section (full width) ──────────────────────────────────────────────
     with st.container():
