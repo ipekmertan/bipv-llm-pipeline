@@ -192,12 +192,14 @@ def render_threshold_check(threshold_result):
             f"{int(recommended)} kWh/m²/year",
             f"For **{city}, {country}** (grid: {em_grid} kgCO₂/kWh), the radiation threshold should be set to **{int(recommended)} kWh/m²/year**",
             (
-                f"The radiation threshold is calculated using **Happle et al. (2019)** — "
+                f"The radiation threshold is calculated using <strong>Happle et al. (2019)</strong> — "
                 f"the threshold is the irradiation level at which BIPV electricity carbon emissions "
-                f"equal the local grid intensity. For **{country}** (grid: **{em_grid} kgCO₂/kWh**), "
-                f"a cleaner grid means only high-irradiation surfaces are carbon-competitive. "
-                f"CEA's default of 800 kWh/m²/year was designed for carbon-intensive grids like Southeast Asia.\n\n"
-                f"*Happle, G. et al. (2019). J. Phys.: Conf. Ser. 1343, 012077.*"
+                f"equal the local grid intensity. For <strong>{country}</strong> "
+                f"(grid: <strong>{em_grid} kgCO&#x2082;/kWh</strong>), a cleaner grid means only "
+                f"high-irradiation surfaces are carbon-competitive. "
+                f"CEA's default of 800 kWh/m&sup2;/year was designed for carbon-intensive grids like Southeast Asia."
+                f"<br><span style='font-size:11px;color:#aaa;margin-top:6px;display:block;font-style:italic;'>"
+                f"Happle, G. et al. (2019). J. Phys.: Conf. Ser. 1343, 012077.</span>"
             ),
             "row_0"
         ),
