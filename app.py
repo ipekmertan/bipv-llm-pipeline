@@ -184,62 +184,80 @@ def render_threshold_check(threshold_result):
     em_grid = threshold_result["em_grid"]
     recommended = threshold_result["recommended_threshold"]
 
+    # Each parameter row: (simulations, parameter_name, recommended_value, info_text, reasoning_text, row_key)
+    rows = [
+        (
+            ["Solar Irradiation", "PV Yield", "PVT Yield"],
+            "annual-radiation-threshold",
+            f"{int(recommended)} kWh/m²/year",
+            f"For **{city}, {country}** (grid: {em_grid} kgCO₂/kWh), the radiation threshold should be set to **{int(recommended)} kWh/m²/year**",
+            (
+                f"The radiation threshold is calculated using **Happle et al. (2019)** — "
+                f"the threshold is the irradiation level at which BIPV electricity carbon emissions "
+                f"equal the local grid intensity. For **{country}** (grid: **{em_grid} kgCO₂/kWh**), "
+                f"a cleaner grid means only high-irradiation surfaces are carbon-competitive. "
+                f"CEA's default of 800 kWh/m²/year was designed for carbon-intensive grids like Southeast Asia.\n\n"
+                f"*Happle, G. et al. (2019). J. Phys.: Conf. Ser. 1343, 012077.*"
+            ),
+            "row_0"
+        ),
+    ]
+
     st.markdown("---")
     st.markdown("### Parameter check")
     with st.expander("View details", expanded=True):
 
-        reasoning_html = (
-            f'<p style="font-size:12px;color:#666;margin:10px 0 0 0;line-height:1.6;">'
-            f'The radiation threshold is calculated using <strong>Happle et al. (2019)</strong> — '
-            f'the threshold is the irradiation level at which BIPV electricity carbon emissions '
-            f'equal the local grid intensity. For <strong>{country}</strong> '
-            f'(grid: <strong>{em_grid} kgCO&#x2082;/kWh</strong>), a cleaner grid means only '
-            f'high-irradiation surfaces are carbon-competitive. '
-            f"CEA's default of 800 kWh/m&sup2;/year was designed for carbon-intensive grids like Southeast Asia.<br>"
-            f'<span style="font-size:11px;color:#aaa;">Happle, G. et al. (2019). J. Phys.: Conf. Ser. 1343, 012077.</span>'
-            f'</p>'
-        ) if st.session_state.reasoning_open else ""
+        # Header row
+        h1, h2, h3, h4 = st.columns([2, 2, 2, 4])
+        with h1:
+            st.markdown('<p style="font-size:11px;font-weight:600;color:#888;letter-spacing:0.08em;text-transform:uppercase;margin:0;">Simulation</p>', unsafe_allow_html=True)
+        with h2:
+            st.markdown('<p style="font-size:11px;font-weight:600;color:#888;letter-spacing:0.08em;text-transform:uppercase;margin:0;">Parameter</p>', unsafe_allow_html=True)
+        with h3:
+            st.markdown('<p style="font-size:11px;font-weight:600;color:#888;letter-spacing:0.08em;text-transform:uppercase;margin:0;">Recommended value</p>', unsafe_allow_html=True)
+        with h4:
+            st.markdown('<p style="font-size:11px;font-weight:600;color:#888;letter-spacing:0.08em;text-transform:uppercase;margin:0;">Info</p>', unsafe_allow_html=True)
+        st.markdown('<hr style="margin:4px 0 8px 0;border:none;border-top:1.5px solid #e0e0e0;">', unsafe_allow_html=True)
 
-        reasoning_btn = "Reasoning ↑" if st.session_state.reasoning_open else "Reasoning →"
+        # Data rows
+        for sims, param, value, info, reasoning, key in rows:
+            c1, c2, c3, c4 = st.columns([2, 2, 2, 4])
+            with c1:
+                st.markdown("\n".join(sims))
+            with c2:
+                st.markdown(f"`{param}`")
+            with c3:
+                st.markdown(f"**{value}**")
+                # Copy button via HTML
+                st.markdown(
+                    f'<button onclick="navigator.clipboard.writeText(\'{int(recommended)}\')" '
+                    f'style="padding:3px 10px;border:1px solid #ddd;border-radius:5px;'
+                    f'background:white;cursor:pointer;font-size:11px;color:#555;margin-top:4px;">copy</button>',
+                    unsafe_allow_html=True
+                )
+            with c4:
+                st.markdown(info)
+                if st.button("Reasoning →" if not st.session_state.get(f"reasoning_{key}") else "Reasoning ↑",
+                             key=f"btn_{key}"):
+                    current = st.session_state.get(f"reasoning_{key}", False)
+                    st.session_state[f"reasoning_{key}"] = not current
+                    st.rerun()
+                if st.session_state.get(f"reasoning_{key}"):
+                    st.markdown(
+                        f'<div style="background:#f7f7f7;border:1px solid #e8e8e8;border-radius:8px;'
+                        f'padding:12px 14px;margin-top:8px;font-size:12px;color:#555;line-height:1.65;">{reasoning}</div>',
+                        unsafe_allow_html=True
+                    )
 
-        table = (
-            '<table style="width:100%;border-collapse:collapse;font-size:13px;font-family:Inter,sans-serif;">'
-            '<thead><tr style="border-bottom:1.5px solid #e0e0e0;">'
-            '<th style="text-align:left;padding:10px 14px;font-weight:600;color:#888;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;width:18%;">Simulation</th>'
-            '<th style="text-align:left;padding:10px 14px;font-weight:600;color:#888;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;width:18%;">Parameter</th>'
-            '<th style="text-align:left;padding:10px 14px;font-weight:600;color:#888;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;width:44%;">Info</th>'
-            '<th style="text-align:left;padding:10px 14px;font-weight:600;color:#888;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;width:20%;">Recommended value</th>'
-            '</tr></thead><tbody>'
-            '<tr style="border-bottom:1px solid #f0f0f0;">'
-            '<td style="padding:12px 14px;color:#333;vertical-align:top;">Solar Irradiation<br>PV Yield<br>PVT Yield</td>'
-            '<td style="padding:12px 14px;color:#333;vertical-align:top;">annual-radiation-threshold</td>'
-            f'<td style="padding:12px 14px;color:#444;line-height:1.6;vertical-align:top;">'
-            f'For <strong>{city}, {country}</strong> (grid: {em_grid} kgCO&#x2082;/kWh), '
-            f'the radiation threshold should be set to <strong>{int(recommended)} kWh/m&sup2;/year</strong>'
-            f'{reasoning_html}'
-            f'</td>'
-            f'<td style="padding:12px 14px;vertical-align:top;">'
-            f'<span style="font-weight:600;color:#1a1a1a;">{int(recommended)} kWh/m&sup2;/year</span>'
-            f'<button onclick="navigator.clipboard.writeText(\'{int(recommended)}\')" '
-            f'style="margin-left:8px;padding:3px 8px;border:1px solid #ddd;border-radius:5px;'
-            f'background:white;cursor:pointer;font-size:11px;color:#555;">copy</button>'
-            f'</td></tr></tbody></table>'
-        )
-        st.markdown(table, unsafe_allow_html=True)
+            st.markdown('<hr style="margin:4px 0;border:none;border-top:1px solid #f0f0f0;">', unsafe_allow_html=True)
 
-        col_r, _ = st.columns([1, 4])
-        with col_r:
-            if st.button(reasoning_btn, key="toggle_reasoning"):
-                st.session_state.reasoning_open = not st.session_state.reasoning_open
-                st.rerun()
-
-        amber = (
+        st.markdown(
             '<div style="background:#fff8e1;color:#7c5e00;border:1px solid #ffe082;'
             'border-radius:8px;padding:10px 14px;font-size:12.5px;margin-top:8px;">'
             "⚠ If your simulation used a different threshold, please correct it in CEA, "
-            "click 'Save settings', rerun the simulation, and re-upload the updated zip.</div>"
+            "click 'Save settings', rerun the simulation, and re-upload the updated zip.</div>",
+            unsafe_allow_html=True
         )
-        st.markdown(amber, unsafe_allow_html=True)
 
 
 # ── Session state ──────────────────────────────────────────────────────────────
