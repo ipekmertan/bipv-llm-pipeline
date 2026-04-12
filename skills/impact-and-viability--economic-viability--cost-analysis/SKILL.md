@@ -19,14 +19,11 @@ It covers:
 
 ---
 
-## CEA4 Integration
+## File Source
 
-This skill runs as a CEA4 plugin.
+This skill reads from the uploaded CEA project zip. The app finds the relevant files automatically by filename — no manual file selection needed.
 
-**Location context** read automatically from project weather file:
-```python
-locator.get_weather()  # → city, country, latitude, longitude
-```
+**Location context** is taken from the project's weather file (`.epw`) found inside the zip.
 
 **PV yield data** accessed via InputLocator:
 ```python
