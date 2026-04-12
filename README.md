@@ -2,7 +2,7 @@
 title: BIPV Analyst
 emoji: ☀️
 colorFrom: yellow
-colorTo: orange
+colorTo: pink
 sdk: docker
 app_file: app.py
 pinned: false
