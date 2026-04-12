@@ -1,3 +1,12 @@
+---
+title: BIPV Analyst
+emoji: ☀️
+colorFrom: yellow
+colorTo: orange
+sdk: docker
+app_file: app.py
+pinned: false
+---
 # BIPV Analyst
 
 A web-based tool that helps architects interpret Building-Integrated Photovoltaics (BIPV) simulation results from the City Energy Analyst (CEA4). Upload your CEA project folder, select what you want to understand, and get plain-language analysis with design-ready insights.
