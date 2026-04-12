@@ -286,17 +286,22 @@ def render_parameter_check(threshold_result, skill_id):
         with c2:
             st.markdown(f'`{row["parameter"]}`')
         with c3:
+            bg = "#fff0f0" if row["status"] == "wrong" else "#e3f2fd"
+            border = "#ffcccc" if row["status"] == "wrong" else "#90caf9"
             st.markdown(
-                f'<div style="background:#e3f2fd;border:1px solid #90caf9;border-radius:6px;'
-                f'padding:6px 10px;font-weight:600;font-size:13px;cursor:help;" '
+                f'<div style="background:{bg};border:1px solid {border};border-radius:6px;'
+                f'padding:6px 10px;font-weight:600;font-size:13px;cursor:default;" '
                 f'title="{row["tooltip"]}">'
                 f'{row["recommended"]}</div>',
                 unsafe_allow_html=True
             )
         with c4:
             st.markdown(
-                f'For <strong>{city}, {country}</strong> (grid: {em_grid} kgCO₂/kWh), '
-                f'the radiation threshold should be set to <strong>{int(recommended)} kWh/m²/year</strong>'
+                f'<div style="font-size:13px;line-height:1.6;color:#444;">'
+                f'For <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), '
+                f'the radiation threshold should be set to <b>{int(recommended)} kWh/m&sup2;/year</b>'
+                f'</div>',
+                unsafe_allow_html=True
             )
             if st.button(
                 "Reasoning →" if not st.session_state.get(f"reasoning_{row['key']}") else "Reasoning ↑",
@@ -624,6 +629,7 @@ else:
                        unsafe_allow_html=True)
         elif st.session_state.skill_id and st.session_state.threshold_result:
             render_parameter_check(st.session_state.threshold_result, st.session_state.skill_id)
+            st.markdown("**Analysis results**")
 
         for i, msg in enumerate(st.session_state.chat_history):
             if msg["role"] == "user" and i == 0:
@@ -664,3 +670,4 @@ else:
                     response = call_llm(system_prompt, st.session_state.chat_history)
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
                 st.rerun()
+
