@@ -187,7 +187,7 @@ def render_threshold_check(threshold_result):
     # Each parameter row: (simulations, parameter_name, recommended_value, info_text, reasoning_text, row_key)
     rows = [
         (
-            ["Solar Irradiation", "PV Yield", "PVT Yield"],
+            ["Renewable Energy Potential Assessment", "→ Photovoltaic (PV) Panels", "→ Photovoltaic-Thermal (PVT) Panels"],
             "annual-radiation-threshold",
             f"{int(recommended)} kWh/m²/year",
             f"For **{city}, {country}** (grid: {em_grid} kgCO₂/kWh), the radiation threshold should be set to **{int(recommended)} kWh/m²/year**",
