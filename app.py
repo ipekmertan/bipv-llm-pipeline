@@ -121,12 +121,12 @@ def build_data_summary(cea_data):
     return "\n".join(lines)
 
 def call_llm(system_prompt, messages):
-    api_key = st.secrets.get("OPENAI_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
+    api_key = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
     try:
         resp = requests.post(
-            "https://api.openai.com/v1/chat/completions",
+            "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={"model": "gpt-4o", "max_tokens": 1500,
+            json={"model": "llama-3.3-70b-versatile", "max_tokens": 1500,
                   "messages": [{"role": "system", "content": system_prompt}] + messages},
             timeout=60
         )
