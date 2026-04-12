@@ -8,37 +8,18 @@ import pandas as pd
 from pathlib import Path
 import requests
 
-st.set_page_config(
-    page_title="BIPV Analyst",
-    page_icon="☀️",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
+st.set_page_config(page_title="BIPV Analyst", page_icon="☀️", layout="wide")
 
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500&display=swap');
 html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
 h1, h2, h3 { font-family: 'DM Serif Display', serif; }
-.main { background: #f8f7f4; }
-.info-box {
-    background: #fffbf0; border-left: 3px solid #c8a96e;
-    padding: 0.8rem 1rem; border-radius: 0 8px 8px 0;
-    margin: 1rem 0; font-size: 0.88rem;
-}
-.bubble-user {
-    background: #2d3142; color: white;
-    border-radius: 18px 18px 4px 18px;
-    padding: 0.8rem 1.1rem; margin: 0.5rem 0 0.5rem auto;
-    max-width: 75%; width: fit-content; float: right; clear: both;
-}
-.bubble-ai {
-    background: white; border: 1px solid #e8e4dc;
-    border-radius: 18px 18px 18px 4px;
-    padding: 0.8rem 1.1rem; margin: 0.5rem auto 0.5rem 0;
-    max-width: 85%; width: fit-content; float: left; clear: both; line-height: 1.65;
-}
-.clearfix { clear: both; }
+.info-box { background:#fffbf0;border-left:3px solid #c8a96e;padding:.8rem 1rem;border-radius:0 8px 8px 0;margin:1rem 0;font-size:.88rem; }
+.bubble-user { background:#2d3142;color:white;border-radius:18px 18px 4px 18px;padding:.8rem 1.1rem;margin:.5rem 0 .5rem auto;max-width:75%;width:fit-content;float:right;clear:both; }
+.bubble-ai { background:white;border:1px solid #e8e4dc;border-radius:18px 18px 18px 4px;padding:.8rem 1.1rem;margin:.5rem auto .5rem 0;max-width:85%;width:fit-content;float:left;clear:both;line-height:1.65; }
+.clearfix { clear:both; }
+div[data-testid="stButton"] button { width: 100%; text-align: left; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -50,26 +31,22 @@ def load_skills_index():
     with open(SKILLS_INDEX_PATH) as f:
         return json.load(f)["skills"]
 
-def load_skill_md(skill_id: str) -> str:
+def load_skill_md(skill_id):
     for folder in SKILLS_DIR.iterdir():
         if folder.name.strip() == skill_id:
-            md_path = folder / "SKILL.md"
-            if md_path.exists():
-                return md_path.read_text()
+            md = folder / "SKILL.md"
+            if md.exists(): return md.read_text()
     return ""
 
-def extract_cea_zip(uploaded_file) -> dict:
-    result = {"project_name": None, "files": {}, "available_simulations": [], "errors": []}
+def extract_cea_zip(uploaded_file):
+    result = {"files": {}, "available_simulations": [], "errors": []}
     with tempfile.TemporaryDirectory() as tmpdir:
         with zipfile.ZipFile(io.BytesIO(uploaded_file.read())) as zf:
             zf.extractall(tmpdir)
         root = Path(tmpdir)
         top = [d for d in root.iterdir() if d.is_dir()]
-        if not top:
-            result["errors"].append("Could not find project folder inside zip.")
-            return result
+        if not top: return result
         scenario = top[0]
-        result["project_name"] = scenario.name
 
         export_dir = scenario / "export" / "results"
         if export_dir.exists():
@@ -82,12 +59,12 @@ def extract_cea_zip(uploaded_file) -> dict:
                     fpath = latest / "solar_irradiation" / fname
                     if fpath.exists():
                         try: result["files"][fname] = pd.read_csv(fpath)
-                        except Exception as e: result["errors"].append(f"{fname}: {e}")
+                        except: pass
                 for fname in ["demand_annually.csv","demand_annually_buildings.csv","demand_seasonally.csv"]:
                     fpath = latest / "demand" / fname
                     if fpath.exists():
                         try: result["files"][fname] = pd.read_csv(fpath)
-                        except Exception as e: result["errors"].append(f"{fname}: {e}")
+                        except: pass
 
         pv_dir = scenario / "outputs" / "data" / "potentials" / "solar"
         if pv_dir.exists():
@@ -104,11 +81,10 @@ def extract_cea_zip(uploaded_file) -> dict:
                 try: result["files"][fname] = pd.read_csv(fpath)
                 except: pass
 
-        for fname in ["PHOTOVOLTAIC_PANELS.csv"]:
-            fpath = scenario / "inputs" / "database" / "COMPONENTS" / "CONVERSION" / fname
-            if fpath.exists():
-                try: result["files"][fname] = pd.read_csv(fpath)
-                except: pass
+        fpath = scenario / "inputs" / "database" / "COMPONENTS" / "CONVERSION" / "PHOTOVOLTAIC_PANELS.csv"
+        if fpath.exists():
+            try: result["files"]["PHOTOVOLTAIC_PANELS.csv"] = pd.read_csv(fpath)
+            except: pass
 
         grid = scenario / "inputs" / "database" / "COMPONENTS" / "FEEDSTOCKS" / "FEEDSTOCKS_LIBRARY" / "GRID.csv"
         if grid.exists():
@@ -141,7 +117,7 @@ def build_data_summary(cea_data):
                   "PHOTOVOLTAIC_PANELS.csv","GRID.csv","Total_demand.csv"]:
         df = cea_data["files"].get(fname)
         if df is not None:
-            lines.append(f"### {fname}\nShape: {df.shape[0]}x{df.shape[1]}\nColumns: {', '.join(df.columns)}\n{df.head(5).to_csv(index=False)}")
+            lines.append(f"### {fname}\n{df.shape[0]}x{df.shape[1]}\n{', '.join(df.columns)}\n{df.head(5).to_csv(index=False)}")
     return "\n".join(lines)
 
 def call_llm(system_prompt, messages):
@@ -169,16 +145,19 @@ Output mode: {output_mode} | Scale: {scale}
 ## CEA data
 {cea_summary}
 
-Instructions: Follow the skill spec for the chosen output mode and scale. Use actual numbers from the data. Plain language suitable for a design presentation. If a file is missing, say which simulation needs to be run."""
+Follow the skill spec for the chosen output mode and scale. Use actual numbers from the data. Plain language for a design presentation. If a file is missing, say which CEA simulation needs to be run."""
 
 # ── Session state ──────────────────────────────────────────────────────────────
-for k, v in [("cea_data",None),("chat_history",[]),("skill_id",None),
-              ("skill_name",None),("scale","Building"),("mode",None),("ran",False)]:
-    if k not in st.session_state: st.session_state[k] = v
+for k, v in [("cea_data", None), ("chat_history", []),
+              ("tree_scale", None), ("tree_goal", None), ("tree_sub", None),
+              ("tree_subsub", None), ("tree_mode", None),
+              ("skill_id", None), ("skill_name", None), ("analysis_ran", False)]:
+    if k not in st.session_state:
+        st.session_state[k] = v
 
 skills = load_skills_index()
 
-# Build tree structure from skills index
+# Build tree structure
 def build_tree():
     tree = {}
     for s in skills:
@@ -194,11 +173,12 @@ def build_tree():
         elif len(path) == 4:
             mid, sub = path[1], path[2]
             if mid not in tree[goal]: tree[goal][mid] = {"id": None, "children": {}}
-            if sub not in tree[goal][mid]["children"]: tree[goal][mid]["children"][sub] = {"id": None, "children": {}}
+            if sub not in tree[goal][mid]["children"]:
+                tree[goal][mid]["children"][sub] = {"id": None, "children": {}}
             tree[goal][mid]["children"][sub]["children"][path[3]] = {"id": s["id"], "children": {}}
     return tree
 
-tree_json = json.dumps(build_tree())
+TREE = build_tree()
 
 # ── Upload screen ──────────────────────────────────────────────────────────────
 if st.session_state.cea_data is None:
@@ -223,172 +203,127 @@ else:
         st.markdown("### Build your analysis")
         sims = st.session_state.cea_data["available_simulations"]
         st.caption("Loaded: " + " · ".join(f"✓ {s}" for s in sims))
+        st.markdown("")
 
-        # ── Interactive tree ───────────────────────────────────────────────────
-        st.html(f"""
-<style>
-*{{box-sizing:border-box;margin:0;padding:0;font-family:'DM Sans',system-ui,sans-serif;}}
-body{{background:transparent;padding:4px 0 12px;}}
-.wrap{{display:flex;gap:0;align-items:flex-start;overflow-x:auto;padding-bottom:8px;min-height:320px;}}
-.col{{min-width:148px;max-width:148px;flex-shrink:0;}}
-.col-lbl{{font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#999;margin:0 0 7px;padding:0 8px;}}
-.opt{{padding:7px 8px;margin:2px 0;border-radius:7px;font-size:12px;cursor:pointer;color:#555;border:.5px solid transparent;line-height:1.3;}}
-.opt:hover{{background:#f0ede8;color:#222;}}
-.opt.sel{{color:#185FA5;font-weight:500;border-color:#85B7EB;background:#E6F1FB;}}
-.col.past{{opacity:.35;pointer-events:none;}}
-.conn{{width:20px;flex-shrink:0;}}
-.sum{{margin-top:10px;padding:7px 10px;background:#E6F1FB;border-radius:7px;font-size:11px;color:#185FA5;display:none;line-height:1.4;}}
-.runbtn{{margin-top:8px;width:100%;padding:10px;background:#2d3142;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;display:none;}}
-.runbtn:hover{{background:#1a1e2e;}}
-</style>
-<div class="wrap" id="tree">
-  <div class="col" id="c-scale"><p class="col-lbl">Scale</p>
-    <div class="opt" onclick="pick('scale','Building',this)">Building</div>
-    <div class="opt" onclick="pick('scale','Cluster',this)">Cluster</div>
-    <div class="opt" onclick="pick('scale','District',this)">District</div>
-  </div>
-  <div class="conn" id="cn1" style="display:none"><svg width="20" height="400" id="sv1" style="overflow:visible"><path id="p1" fill="none" stroke="#c8b89a" stroke-width="1.5" stroke-dasharray="3,2"/></svg></div>
-  <div class="col" id="c-goal" style="display:none"><p class="col-lbl">Goal</p>
-    <div class="opt" onclick="pick('goal','Site Potential',this)">Site Potential</div>
-    <div class="opt" onclick="pick('goal','Performance Estimation',this)">Performance Estimation</div>
-    <div class="opt" onclick="pick('goal','Impact and Viability',this)">Impact & Viability</div>
-    <div class="opt" onclick="pick('goal','Optimize My Design',this)">Optimize My Design</div>
-  </div>
-  <div class="conn" id="cn2" style="display:none"><svg width="20" height="400" id="sv2" style="overflow:visible"><path id="p2" fill="none" stroke="#c8b89a" stroke-width="1.5" stroke-dasharray="3,2"/></svg></div>
-  <div class="col" id="c-sub" style="display:none"><p class="col-lbl">Topic</p></div>
-  <div class="conn" id="cn3" style="display:none"><svg width="20" height="400" id="sv3" style="overflow:visible"><path id="p3" fill="none" stroke="#c8b89a" stroke-width="1.5" stroke-dasharray="3,2"/></svg></div>
-  <div class="col" id="c-subsub" style="display:none"><p class="col-lbl">Analysis</p></div>
-  <div class="conn" id="cn4" style="display:none"><svg width="20" height="400" id="sv4" style="overflow:visible"><path id="p4" fill="none" stroke="#c8b89a" stroke-width="1.5" stroke-dasharray="3,2"/></svg></div>
-  <div class="col" id="c-mode" style="display:none"><p class="col-lbl">Output mode</p>
-    <div class="opt" onclick="pick('mode','Key takeaway',this)">Key takeaway</div>
-    <div class="opt" onclick="pick('mode','Explain the numbers',this)">Explain the numbers</div>
-    <div class="opt" onclick="pick('mode','Design implication',this)">Design implication</div>
-  </div>
-</div>
-<div class="sum" id="sumbar"></div>
-<button class="runbtn" id="runbtn" onclick="doRun()">▶ Run analysis</button>
+        # ── Step 1: Scale ──────────────────────────────────────────────────────
+        if st.session_state.tree_scale:
+            st.markdown(f"**Scale** · ~~{st.session_state.tree_scale}~~" if False else f"**Scale** · *{st.session_state.tree_scale}*")
+        else:
+            st.markdown("**Step 1 — Scale**")
+            for scale in ["Building", "Cluster", "District"]:
+                if st.button(scale, key=f"scale_{scale}"):
+                    st.session_state.tree_scale = scale
+                    st.session_state.tree_goal = None
+                    st.session_state.tree_sub = None
+                    st.session_state.tree_subsub = None
+                    st.session_state.tree_mode = None
+                    st.session_state.analysis_ran = False
+                    st.rerun()
 
-<script>
-const T={tree_json};
-let S={{scale:null,goal:null,sub:null,subsub:null,mode:null,skillId:null,skillName:null}};
-const $=id=>document.getElementById(id);
-const show=id=>{{$(id).style.display='';}}
-const hide=id=>{{$(id).style.display='none';}}
-const past=id=>{{$(id).classList.add('past');}}
-const unpast=id=>{{$(id).classList.remove('past');}}
-const clr=col=>{{document.querySelectorAll('#'+col+' .opt').forEach(o=>o.classList.remove('sel'));}}
+        # ── Step 2: Goal ──────────────────────────────────────────────────────
+        if st.session_state.tree_scale:
+            st.markdown("")
+            if st.session_state.tree_goal:
+                st.markdown(f"**Goal** · *{st.session_state.tree_goal}*")
+            else:
+                st.markdown("**Step 2 — What do you want to understand?**")
+                for goal in TREE.keys():
+                    label = goal.replace("Impact and Viability", "Impact & Viability")
+                    if st.button(label, key=f"goal_{goal}"):
+                        st.session_state.tree_goal = goal
+                        st.session_state.tree_sub = None
+                        st.session_state.tree_subsub = None
+                        st.session_state.tree_mode = None
+                        st.session_state.analysis_ran = False
+                        st.rerun()
 
-function drawP(sid,pid,fromEl,toId){{
-  const sv=$(sid),pa=$(pid),to=$(toId);
-  if(!fromEl||!to)return;
-  const sr=sv.getBoundingClientRect(),fr=fromEl.getBoundingClientRect();
-  const lbl=to.querySelector('.col-lbl');
-  if(!lbl)return;
-  const tr=lbl.getBoundingClientRect();
-  const y1=fr.top+fr.height/2-sr.top, y2=tr.top+8-sr.top;
-  const h=Math.max(Math.abs(y2-y1)+50,50);
-  sv.setAttribute('height',h);
-  pa.setAttribute('d',`M0 ${{y1}} C10 ${{y1}},10 ${{y2}},20 ${{y2}}`);
-}}
+        # ── Step 3: Topic ─────────────────────────────────────────────────────
+        if st.session_state.tree_goal:
+            st.markdown("")
+            topics = TREE[st.session_state.tree_goal]
+            if st.session_state.tree_sub:
+                st.markdown(f"**Topic** · *{st.session_state.tree_sub}*")
+            else:
+                st.markdown("**Step 3 — Topic**")
+                for topic, node in topics.items():
+                    if st.button(topic, key=f"sub_{topic}"):
+                        st.session_state.tree_sub = topic
+                        st.session_state.tree_subsub = None
+                        st.session_state.tree_mode = None
+                        st.session_state.analysis_ran = False
+                        # If no children, set skill directly
+                        if not node["children"]:
+                            st.session_state.skill_id = node["id"]
+                            st.session_state.skill_name = topic
+                        st.rerun()
 
-function pick(type,val,el){{
-  if(type==='scale'){{
-    S={{scale:val,goal:null,sub:null,subsub:null,mode:null,skillId:null,skillName:null}};
-    clr('c-scale');el.classList.add('sel');past('c-scale');
-    ['cn2','c-sub','cn3','c-subsub','cn4','c-mode'].forEach(hide);
-    show('cn1');show('c-goal');unpast('c-goal');
-    setTimeout(()=>drawP('sv1','p1',el,'c-goal'),20);
-  }} else if(type==='goal'){{
-    S.goal=val;S.sub=null;S.subsub=null;S.mode=null;S.skillId=null;S.skillName=null;
-    clr('c-goal');el.classList.add('sel');past('c-goal');
-    ['cn3','c-subsub','cn4','c-mode'].forEach(hide);
-    const subs=T[val];
-    const col=$('c-sub');col.innerHTML='<p class="col-lbl">Topic</p>';
-    Object.keys(subs).forEach(k=>{{
-      const d=document.createElement('div');d.className='opt';d.textContent=k;
-      d.onclick=()=>pick('sub',k,d);col.appendChild(d);
-    }});
-    show('cn2');show('c-sub');unpast('c-sub');
-    setTimeout(()=>drawP('sv2','p2',el,'c-sub'),20);
-  }} else if(type==='sub'){{
-    S.sub=val;S.subsub=null;S.mode=null;S.skillId=null;S.skillName=null;
-    clr('c-sub');el.classList.add('sel');
-    ['cn4','c-mode'].forEach(hide);
-    const node=T[S.goal][val];
-    const kids=node&&node.children?Object.keys(node.children):[];
-    if(kids.length>0){{
-      past('c-sub');
-      const col=$('c-subsub');col.innerHTML='<p class="col-lbl">Analysis</p>';
-      kids.forEach(k=>{{
-        const child=node.children[k];
-        const d=document.createElement('div');d.className='opt';d.textContent=k;
-        d.onclick=()=>{{S.skillId=child.id;S.skillName=k;pick('subsub',k,d);}};
-        col.appendChild(d);
-      }});
-      show('cn3');show('c-subsub');unpast('c-subsub');
-      setTimeout(()=>drawP('sv3','p3',el,'c-subsub'),20);
-    }} else {{
-      S.skillId=node?node.id:null;S.skillName=val;unpast('c-sub');
-      show('cn4');show('c-mode');unpast('c-mode');
-      setTimeout(()=>drawP('sv4','p4',el,'c-mode'),20);
-    }}
-  }} else if(type==='subsub'){{
-    clr('c-subsub');el.classList.add('sel');past('c-subsub');
-    show('cn4');show('c-mode');unpast('c-mode');
-    setTimeout(()=>drawP('sv4','p4',el,'c-mode'),20);
-  }} else if(type==='mode'){{
-    S.mode=val;clr('c-mode');el.classList.add('sel');past('c-mode');
-  }}
-  upd();
-}}
+        # ── Step 4: Analysis (if subtopics exist) ─────────────────────────────
+        if st.session_state.tree_sub:
+            node = TREE[st.session_state.tree_goal][st.session_state.tree_sub]
+            if node["children"]:
+                st.markdown("")
+                if st.session_state.tree_subsub:
+                    st.markdown(f"**Analysis** · *{st.session_state.tree_subsub}*")
+                else:
+                    st.markdown("**Step 4 — Analysis**")
+                    for child, child_node in node["children"].items():
+                        if st.button(child, key=f"subsub_{child}"):
+                            st.session_state.tree_subsub = child
+                            st.session_state.tree_mode = None
+                            st.session_state.analysis_ran = False
+                            st.session_state.skill_id = child_node["id"]
+                            st.session_state.skill_name = child
+                            st.rerun()
 
-function upd(){{
-  const bar=$('sumbar'),btn=$('runbtn');
-  if(S.scale&&S.skillName&&S.mode){{
-    bar.style.display='block';
-    bar.textContent=S.scale+' · '+S.skillName+' · '+S.mode;
-    btn.style.display='block';
-  }} else {{bar.style.display='none';btn.style.display='none';}}
-}}
+        # ── Step 5: Output mode ───────────────────────────────────────────────
+        skill_ready = st.session_state.skill_id and (
+            not TREE.get(st.session_state.tree_goal, {}).get(st.session_state.tree_sub or "", {}).get("children") or
+            st.session_state.tree_subsub
+        )
+        if skill_ready:
+            st.markdown("")
+            if st.session_state.tree_mode:
+                st.markdown(f"**Output mode** · *{st.session_state.tree_mode}*")
+            else:
+                st.markdown("**Step 5 — How do you want the answer?**")
+                for mode in ["Key takeaway", "Explain the numbers", "Design implication"]:
+                    if st.button(mode, key=f"mode_{mode}"):
+                        st.session_state.tree_mode = mode
+                        st.session_state.analysis_ran = False
+                        st.rerun()
 
-function doRun(){{
-  if(!S.skillId||!S.mode||!S.scale)return;
-  const url=new URL(window.location.href);
-  window.parent.location.href=window.parent.location.href.split('?')[0]+
-    '?skill_id='+encodeURIComponent(S.skillId)+
-    '&skill_name='+encodeURIComponent(S.skillName)+
-    '&scale='+encodeURIComponent(S.scale)+
-    '&mode='+encodeURIComponent(S.mode);
-}}
-</script>
-""")
+        # ── Run button ────────────────────────────────────────────────────────
+        if st.session_state.tree_mode and st.session_state.skill_id and not st.session_state.analysis_ran:
+            st.markdown("")
+            if st.button("▶ Run analysis", type="primary"):
+                st.session_state.chat_history = []
+                st.session_state.analysis_ran = True
+                st.rerun()
 
-        # Handle query params from tree
-        qp = st.query_params
-        if "skill_id" in qp and not st.session_state.ran:
-            st.session_state.skill_id = qp["skill_id"]
-            st.session_state.skill_name = qp["skill_name"]
-            st.session_state.scale = qp["scale"]
-            st.session_state.mode = qp["mode"]
-            st.session_state.chat_history = []
-            st.session_state.ran = True
-
+        # ── Start over ────────────────────────────────────────────────────────
         st.markdown("---")
-        if st.button("↩ Upload new project"):
-            st.session_state.cea_data = None
-            st.session_state.chat_history = []
-            st.session_state.ran = False
-            st.query_params.clear()
-            st.rerun()
+        col_a, col_b = st.columns(2)
+        with col_a:
+            if st.button("↺ Start over"):
+                for k in ["tree_scale","tree_goal","tree_sub","tree_subsub","tree_mode","skill_id","skill_name","analysis_ran"]:
+                    st.session_state[k] = None
+                st.session_state.chat_history = []
+                st.rerun()
+        with col_b:
+            if st.button("↩ New project"):
+                for k in ["cea_data","tree_scale","tree_goal","tree_sub","tree_subsub","tree_mode","skill_id","skill_name","analysis_ran"]:
+                    st.session_state[k] = None
+                st.session_state.chat_history = []
+                st.rerun()
 
     with col_right:
         st.markdown("### Analysis")
 
-        if st.session_state.ran and st.session_state.skill_id and not st.session_state.chat_history:
+        if st.session_state.analysis_ran and st.session_state.skill_id and not st.session_state.chat_history:
             skill_md = load_skill_md(st.session_state.skill_id)
             cea_summary = build_data_summary(st.session_state.cea_data)
-            system_prompt = build_system_prompt(skill_md, cea_summary, st.session_state.mode, st.session_state.scale)
-            user_msg = f"Run the **{st.session_state.skill_name}** analysis at **{st.session_state.scale}** scale in **{st.session_state.mode}** mode. Use only the data provided."
+            system_prompt = build_system_prompt(skill_md, cea_summary, st.session_state.tree_mode, st.session_state.tree_scale)
+            user_msg = f"Run the **{st.session_state.skill_name}** analysis at **{st.session_state.tree_scale}** scale in **{st.session_state.tree_mode}** mode. Use only the data provided."
             st.session_state.chat_history.append({"role": "user", "content": user_msg})
             with st.spinner("Analysing…"):
                 response = call_llm(system_prompt, st.session_state.chat_history)
@@ -396,7 +331,7 @@ function doRun(){{
             st.rerun()
 
         if not st.session_state.chat_history:
-            st.markdown('<div class="info-box">← Complete the tree on the left to run an analysis.</div>', unsafe_allow_html=True)
+            st.markdown('<div class="info-box">← Complete the steps on the left to run an analysis.</div>', unsafe_allow_html=True)
 
         for msg in st.session_state.chat_history:
             if msg["role"] == "user":
@@ -406,11 +341,14 @@ function doRun(){{
 
         if st.session_state.chat_history:
             st.markdown("---")
-            followup = st.text_input("Ask a follow-up…", key="fu", placeholder="e.g. Which building has the best south facade?")
+            followup = st.text_input("Ask a follow-up…", key="fu",
+                                     placeholder="e.g. Which building has the best south facade?")
             if st.button("Send") and followup.strip():
                 skill_md = load_skill_md(st.session_state.skill_id or "")
                 cea_summary = build_data_summary(st.session_state.cea_data)
-                system_prompt = build_system_prompt(skill_md, cea_summary, st.session_state.mode or "", st.session_state.scale or "")
+                system_prompt = build_system_prompt(skill_md, cea_summary,
+                                                    st.session_state.tree_mode or "",
+                                                    st.session_state.tree_scale or "")
                 st.session_state.chat_history.append({"role": "user", "content": followup})
                 with st.spinner("Thinking…"):
                     response = call_llm(system_prompt, st.session_state.chat_history)
