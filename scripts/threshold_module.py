@@ -200,13 +200,14 @@ def _nearest_key(obj: dict, value: float) -> str:
     return f"{min(keys, key=lambda k: abs(k - value)):.2f}"
 
 
-def get_acacia_curve(panel_type: str, em_grid: float, self_consumption: float = 0.5) -> dict | None:
+def get_acacia_curve(panel_type: str, em_grid: float, self_consumption: float = 0.5, acacia_data: dict = None) -> dict | None:
     """
     Fetch the ACACIA LCA impact curve for a given panel type and grid emissions.
     Returns dict with irradiance and impact arrays, or None if unavailable.
     self_consumption is derived from PV + demand CSVs in the zip.
+    acacia_data: pre-fetched curve data (optional, fetches if not provided)
     """
-    data = fetch_acacia_curves()
+    data = acacia_data or fetch_acacia_curves()
     if data is None:
         return None
 
@@ -334,7 +335,8 @@ def get_mccarty_context(em_grid: float, panel_type: str) -> dict:
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 def get_threshold_check(weather_header: str, cea_default: float = 800,
-                        self_consumption: float = 0.5) -> dict:
+                        self_consumption: float = 0.5,
+                        acacia_data: dict = None) -> dict:
     """
     Full threshold check for a given CEA project location.
     Returns dict with all info needed to render the UI and inform the LLM.
@@ -370,10 +372,11 @@ def get_threshold_check(weather_header: str, cea_default: float = 800,
 
     # ACACIA curves for all simulated panels (for visualization)
     acacia_curves = {}
-    for ptype in PV_PANEL_TYPES:
-        curve = get_acacia_curve(ptype, em_grid, self_consumption)
-        if curve:
-            acacia_curves[ptype] = curve
+    if acacia_data:
+        for ptype in PV_PANEL_TYPES:
+            curve = get_acacia_curve(ptype, em_grid, self_consumption, acacia_data=acacia_data)
+            if curve:
+                acacia_curves[ptype] = curve
 
     # McCarty 2025 context for default panel
     mccarty = get_mccarty_context(em_grid, DEFAULT_PANEL)
@@ -423,4 +426,3 @@ if __name__ == "__main__":
     if result["mccarty"]:
         print(f"McCarty closest location: {result['mccarty']['location']}")
         print(f"McCarty CPP 10yr: {result['mccarty']['cpp_10yr']} kWh/m²/year")
-
