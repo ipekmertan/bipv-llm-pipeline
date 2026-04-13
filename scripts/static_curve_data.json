@@ -1,0 +1,5 @@
+cd your-repo-folder
+curl -o scripts/static_curve_data.json https://acacia.arch.ethz.ch/static/data/static_curve_data.json
+git add scripts/static_curve_data.json
+git commit -m "add ACACIA static curve data"
+git push
