@@ -447,37 +447,27 @@ def render_parameter_check(threshold_result, skill_id):
                 )
                 curve = acacia_curves.get(selected_curve_panel)
                 if curve is not None:
-                    import numpy as np
-                    irr     = [float(x) for x in curve["irradiance"]]
-                    imp     = [float(x) for x in curve["impact"]]
-                    imp_min = [float(x) for x in curve["impact_min"]]
-                    imp_max = [float(x) for x in curve["impact_max"]]
+                    irr = [float(x) for x in curve["irradiance"]]
+                    imp = [float(x) for x in curve["impact"]]
 
-                    chart_df = pd.DataFrame({"irradiance": irr, "impact": imp, "impact_min": imp_min, "impact_max": imp_max})
+                    chart_df = pd.DataFrame({"irradiance": irr, "impact": imp})
                     chart_df = chart_df[(chart_df["irradiance"] <= 1000) & (chart_df["impact"] >= 0)]
-                    y_max = round(min(float(chart_df["impact_max"].max()) * 1.05, 2.0), 1)
+                    y_max = min(float(chart_df["impact"].iloc[0]) * 1.05, 2.0)
 
-                    band = alt.Chart(chart_df).mark_area(
-                        color="#f5a623", opacity=0.4
-                    ).encode(
-                        x=alt.X("irradiance:Q", title="Annual irradiance (kWh/sqm/a)",
-                                scale=alt.Scale(domain=[0, 1000])),
-                        y=alt.Y("impact_max:Q", title="Device intensity (kgCO2e/kWh)",
-                                scale=alt.Scale(domain=[0, y_max])),
-                        y2=alt.Y2("impact_min:Q")
-                    )
                     line = alt.Chart(chart_df).mark_line(
                         color="#c07800", strokeWidth=2
                     ).encode(
-                        x="irradiance:Q",
-                        y=alt.Y("impact:Q", scale=alt.Scale(domain=[0, y_max]))
+                        x=alt.X("irradiance:Q", title="Annual irradiance (kWh/sqm/a)",
+                                scale=alt.Scale(domain=[0, 1000])),
+                        y=alt.Y("impact:Q", title="Device intensity (kgCO2e/kWh)",
+                                scale=alt.Scale(domain=[0, y_max]))
                     )
                     grid_df = pd.DataFrame({"y": [float(em_grid)]})
                     grid_line = alt.Chart(grid_df).mark_rule(
                         color="black", strokeWidth=1.5
                     ).encode(y=alt.Y("y:Q", scale=alt.Scale(domain=[0, y_max])))
 
-                    chart = (band + line + grid_line).properties(height=220).configure_axis(
+                    chart = (line + grid_line).properties(height=220).configure_axis(
                         grid=True, gridColor="#e0e0e0", gridDash=[4, 4]
                     ).configure_view(strokeWidth=0)
                     st.altair_chart(chart, use_container_width=True)
