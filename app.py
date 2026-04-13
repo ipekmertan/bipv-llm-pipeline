@@ -14,7 +14,7 @@ import requests
 import numpy as np
 import pandas as pd
 import streamlit as st
-import anthropic
+
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
@@ -291,19 +291,21 @@ def load_skill_prompt(skill_id: str) -> str:
 # ── Claude API ───────────────────────────────────────────────────────────────
 
 def call_claude(system_prompt: str, user_message: str) -> str:
-    """Call Claude API and stream response."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY") or st.secrets.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        return "⚠️ No Anthropic API key found. Add ANTHROPIC_API_KEY to your Hugging Face Space secrets."
-
-    client = anthropic.Anthropic(api_key=api_key)
-    with client.messages.stream(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1500,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_message}],
-    ) as stream:
-        return stream.get_final_text()
+    """Call LLM API."""
+    api_key = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
+    try:
+        resp = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"model": "llama-3.3-70b-versatile", "max_tokens": 1500,
+                  "messages": [{"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_message}]},
+            timeout=60
+        )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        return f"⚠️ API error: {e}"
 
 
 def build_threshold_context(threshold_result: dict, grid_emissions: float, self_consumption: float) -> str:
@@ -567,14 +569,16 @@ Previous analysis context is in the conversation history. Be concise and design-
             history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[-4:]]
             history.append({"role": "user", "content": followup})
 
-            api_key = os.environ.get("ANTHROPIC_API_KEY") or st.secrets.get("ANTHROPIC_API_KEY", "")
-            client = anthropic.Anthropic(api_key=api_key)
-            response = client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=800,
-                system=system,
-                messages=history,
-            ).content[0].text
+            api_key = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
+            resp = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={"model": "llama-3.3-70b-versatile", "max_tokens": 800,
+                      "messages": [{"role": "system", "content": system}] + history},
+                timeout=60
+            )
+            resp.raise_for_status()
+            response = resp.json()["choices"][0]["message"]["content"]
 
             st.session_state.messages.append({"role": "user", "content": followup, "label": "Follow-up"})
             st.session_state.messages.append({"role": "assistant", "content": response, "label": "Response"})
