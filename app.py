@@ -439,14 +439,14 @@ def render_parameter_check(threshold_result, skill_id):
                 curve = acacia_curves.get(selected_curve_panel)
                 if curve is not None:
                     import numpy as np
-                    irr     = list(np.array(curve["irradiance"]).flat)
-                    imp     = list(np.array(curve["impact"]).flat)
-                    imp_min = list(np.array(curve["impact_min"]).flat)
-                    imp_max = list(np.array(curve["impact_max"]).flat)
+                    irr     = [float(x) for x in curve["irradiance"]]
+                    imp     = [float(x) for x in curve["impact"]]
+                    imp_min = [float(x) for x in curve["impact_min"]]
+                    imp_max = [float(x) for x in curve["impact_max"]]
 
                     chart_df = pd.DataFrame({"irradiance": irr, "impact": imp, "impact_min": imp_min, "impact_max": imp_max})
                     chart_df = chart_df[(chart_df["irradiance"] <= 1000) & (chart_df["impact"] >= 0)]
-                    y_max = max(2.0, float(em_grid) * 3)
+                    y_max = round(min(float(chart_df["impact_max"].max()) * 1.05, 2.0), 1)
 
                     band = alt.Chart(chart_df).mark_area(
                         color="#f5a623", opacity=0.4
@@ -822,3 +822,4 @@ else:
                     response = call_llm(system_prompt, st.session_state.chat_history)
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
                 st.rerun()
+
