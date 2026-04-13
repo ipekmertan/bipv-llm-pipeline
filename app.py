@@ -308,7 +308,7 @@ def render_parameter_check(threshold_result, skill_id):
         types_str = ", ".join([f"{p} ({PV_PANEL_TYPES.get(p,{}).get('description','')})" for p in run_pv_types])
         sim_label = f'Photovoltaic simulation<br><span style="font-size:11px;color:#999;">{types_str}</span>'
 
-    # Info text — plain language, show raw + capped + explanation
+    # Info text — one sentence
     pr_label = threshold_result.get("pr_label", "PR 0.75")
     if len(run_pv_types) == 1:
         raw = int(type_thresholds_uncapped.get(run_pv_types[0], recommended))
@@ -316,39 +316,30 @@ def render_parameter_check(threshold_result, skill_id):
         panel_name = PV_PANEL_TYPES.get(run_pv_types[0], {}).get("description", "")
         if raw == cap:
             info_text = (
-                f'In <b>{city}, {country}</b>, a {panel_name} panel needs at least '
-                f'<b>{raw} kWh/m&#x00B2;/year</b> of sunlight to offset the carbon from its own manufacturing. '
-                f'Set this as your threshold in CEA.'
+                f'In <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), '
+                f'the annual radiation threshold is <b>{raw} kWh/m&#x00B2;/year</b>.'
             )
         else:
             info_text = (
-                f'In <b>{city}, {country}</b>, the carbon math gives {raw} kWh/m&#x00B2;/year for a {panel_name} panel '
-                f'— but that would exclude almost every surface in practice, so it is capped at '
-                f'<b>{cap} kWh/m&#x00B2;/year</b>. '
-                f"This is because {country}'s grid is very clean ({em_grid} kgCO&#x2082;/kWh), "
-                f'making it hard for any panel to beat it on carbon. '
-                f'Set <b>{cap} kWh/m&#x00B2;/year</b> as your threshold in CEA.'
+                f'In <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), '
+                f'the annual radiation threshold is {raw} kWh/m&#x00B2;/year '
+                f'— but that would exclude almost every surface in practice, '
+                f'so it is capped at <b>{cap} kWh/m&#x00B2;/year</b>.'
             )
     else:
         raw_strictest = int(type_thresholds_uncapped.get(max_ptype, recommended))
         cap_strictest = int(recommended)
         if raw_strictest == cap_strictest:
             info_text = (
-                f'In <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), each panel type gives a different minimum. '
-                f'Since CEA uses one value for all panels, use the strictest one — '
-                f'<b>{raw_strictest} kWh/m&#x00B2;/year</b> '
-                f'({max_ptype}, {driving_panel.get("description", "")} — highest manufacturing carbon, hardest to justify). '
-                f'Set this as your threshold in CEA.'
+                f'In <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), '
+                f'the annual radiation threshold is <b>{raw_strictest} kWh/m&#x00B2;/year</b>.'
             )
         else:
             info_text = (
-                f'In <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), each panel type gives a different minimum. '
-                f'The strictest panel ({max_ptype}, {driving_panel.get("description", "")}) gives a raw value of '
-                f'{raw_strictest} kWh/m&#x00B2;/year — but that would exclude almost every surface in practice, '
-                f'so it is capped at <b>{cap_strictest} kWh/m&#x00B2;/year</b>. '
-                f"This is because {country}'s grid is very clean ({em_grid} kgCO&#x2082;/kWh), "
-                f'making it hard for any panel to beat it on carbon. '
-                f'Set <b>{cap_strictest} kWh/m&#x00B2;/year</b> as your threshold in CEA.'
+                f'In <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), '
+                f'the annual radiation threshold is {raw_strictest} kWh/m&#x00B2;/year '
+                f'— but that would exclude almost every surface in practice, '
+                f'so it is capped at <b>{cap_strictest} kWh/m&#x00B2;/year</b>.'
             )
 
     st.markdown("**Parameter check**")
@@ -422,6 +413,8 @@ def render_parameter_check(threshold_result, skill_id):
                 f'For <strong>{country}</strong> (grid: {em_grid} kgCO&#x2082;/kWh) — '
                 f'the cleaner the grid, the harder panels are to justify on carbon grounds, '
                 f'so a cleaner grid means a higher threshold. '
+                f'When the raw threshold exceeds 1200 kWh/m&#x00B2;/year it is capped there, '
+                f'because beyond that almost no real surface qualifies and the value becomes impractical. '
                 f'Research on Zurich specifically found that a 10-year carbon payback '
                 f'is not achievable for any panel type given its very clean grid. '
                 f'Only CdTe panels get close (~18.5 years at best). '
@@ -450,29 +443,34 @@ def render_parameter_check(threshold_result, skill_id):
                 if curve is not None:
                     irr = curve["irradiance"] if isinstance(curve["irradiance"], list) else curve["irradiance"].tolist()
                     imp = curve["impact"] if isinstance(curve["impact"], list) else curve["impact"].tolist()
-                    chart_df = pd.DataFrame({"irradiance": irr, "impact": imp})
-                    chart_df = chart_df[(chart_df["irradiance"] <= 1000) & (chart_df["impact"] <= 2.0)]
+                    imp_min = curve["impact_min"] if isinstance(curve["impact_min"], list) else curve["impact_min"].tolist()
+                    imp_max = curve["impact_max"] if isinstance(curve["impact_max"], list) else curve["impact_max"].tolist()
 
-                    area = alt.Chart(chart_df).mark_area(
-                        color="#f5a623", opacity=0.35
+                    chart_df = pd.DataFrame({"irradiance": irr, "impact": imp, "impact_min": imp_min, "impact_max": imp_max})
+                    chart_df = chart_df[(chart_df["irradiance"] <= 1000) & (chart_df["impact"] >= 0)]
+                    y_max = max(2.0, float(em_grid) * 3)
+
+                    band = alt.Chart(chart_df).mark_area(
+                        color="#f5a623", opacity=0.4
                     ).encode(
                         x=alt.X("irradiance:Q", title="Annual irradiance (kWh/sqm/a)",
                                 scale=alt.Scale(domain=[0, 1000])),
-                        y=alt.Y("impact:Q", title="Device intensity (kgCO2e/kWh)",
-                                scale=alt.Scale(domain=[0, 2.0]))
+                        y=alt.Y("impact_max:Q", title="Device intensity (kgCO2e/kWh)",
+                                scale=alt.Scale(domain=[0, y_max])),
+                        y2=alt.Y2("impact_min:Q")
                     )
                     line = alt.Chart(chart_df).mark_line(
                         color="#c07800", strokeWidth=2
                     ).encode(
                         x="irradiance:Q",
-                        y="impact:Q"
+                        y=alt.Y("impact:Q", scale=alt.Scale(domain=[0, y_max]))
                     )
-                    grid_df = pd.DataFrame({"y": [em_grid]})
+                    grid_df = pd.DataFrame({"y": [float(em_grid)]})
                     grid_line = alt.Chart(grid_df).mark_rule(
                         color="black", strokeWidth=1.5
-                    ).encode(y="y:Q")
+                    ).encode(y=alt.Y("y:Q", scale=alt.Scale(domain=[0, y_max])))
 
-                    chart = (area + line + grid_line).properties(height=220).configure_axis(
+                    chart = (band + line + grid_line).properties(height=220).configure_axis(
                         grid=True, gridColor="#e0e0e0", gridDash=[4, 4]
                     ).configure_view(strokeWidth=0)
                     st.altair_chart(chart, use_container_width=True)
