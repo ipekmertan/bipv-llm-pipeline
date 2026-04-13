@@ -66,12 +66,9 @@ def load_skills_index():
 
 @st.cache_data(ttl=3600)
 def load_acacia_curves():
-    try:
-        r = requests.get("https://acacia.arch.ethz.ch/static/data/static_curve_data.json", timeout=15)
-        r.raise_for_status()
-        return r.json()
-    except Exception:
-        return None
+    local = Path(__file__).parent / "scripts" / "static_curve_data.json"
+    with open(local) as f:
+        return json.load(f)
 
 def load_skill_md(skill_id):
     for folder in SKILLS_DIR.iterdir():
@@ -822,5 +819,3 @@ else:
                     response = call_llm(system_prompt, st.session_state.chat_history)
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
                 st.rerun()
-
-
