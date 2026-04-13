@@ -9,12 +9,39 @@ Threshold = irradiation at which em_BIPV = em_grid
 → I_threshold = EmBIPV / (em_grid × η_BIPV × PR_BIPV × A_BIPV × LT_BIPV)
 """
 
-# BIPV panel constants from Happle et al. 2019 (Table in paper)
-EM_BIPV = 7240        # kgCO2-eq embodied carbon for 3kWp single-Si facade system
-A_BIPV = 19.6         # m² active surface area
-ETA_BIPV = 0.14       # panel efficiency (14%)
-PR_BIPV = 0.85        # performance ratio
-LT_BIPV = 30          # system lifetime in years
+# BIPV panel constants per panel type
+# Source: CEA4 PHOTOVOLTAIC_PANELS.csv (jmccarty CACTUS, ETH Zürich, 2024)
+# Embodied carbon values consistent with Galimshina et al. (2024),
+#   Renewable Energy 236, 121404
+# PR = 0.75 per Galimshina 2024; LT = 25yr as in CEA database
+PR_BIPV = 0.75
+LT_BIPV = 25
+
+PV_PANEL_TYPES = {
+    "PV1": {
+        "description": "Monocrystalline Si (cSi)",
+        "em_bipv": 255.77,   # kgCO2eq/m²
+        "eta": 0.1846,       # efficiency
+    },
+    "PV2": {
+        "description": "Multicrystalline Si (mcSi)",
+        "em_bipv": 191.18,
+        "eta": 0.1750,
+    },
+    "PV3": {
+        "description": "Cadmium Telluride (CdTe)",
+        "em_bipv": 47.55,
+        "eta": 0.1760,
+    },
+    "PV4": {
+        "description": "CIGS",
+        "em_bipv": 75.91,
+        "eta": 0.0994,
+    },
+}
+
+# Default fallback (PV1 = mono-Si, most common)
+DEFAULT_PANEL = "PV1"
 
 # IEA 2023 grid carbon intensity by country (kgCO2/kWh)
 # Sources: IEA Electricity Information 2023, Our World in Data, Ember Climate
@@ -141,17 +168,43 @@ def parse_epw_location(weather_header: str) -> dict:
     return result
 
 
-def calculate_threshold(em_grid: float) -> float:
+def calculate_threshold(em_grid: float, panel_type: str = None, capped: bool = True) -> float:
     """
     Calculate radiation threshold using Happle et al. 2019 Equation 1.
-    I_threshold = EmBIPV / (em_grid × η_BIPV × PR_BIPV × A_BIPV × LT_BIPV)
-    Returns threshold in kWh/m²/year.
+    I_threshold = EmBIPV / (em_grid × η_BIPV × PR_BIPV × LT_BIPV)
+
+    Panel-specific embodied carbon and efficiency from CEA4 database
+    (Galimshina et al. 2024, ETH Zürich). Returns kWh/m²/year.
+    If capped=True, result is bounded between 800–1200 (practical BIPV range
+    per McCarty et al. 2025). If capped=False, returns raw formula result.
     """
-    denominator = em_grid * ETA_BIPV * PR_BIPV * A_BIPV * LT_BIPV
+    panel = PV_PANEL_TYPES.get(panel_type or DEFAULT_PANEL, PV_PANEL_TYPES[DEFAULT_PANEL])
+    em_bipv = panel["em_bipv"]
+    eta = panel["eta"]
+
+    denominator = em_grid * eta * PR_BIPV * LT_BIPV
     if denominator <= 0:
-        return 800  # fallback to CEA default
-    threshold_Wh = EM_BIPV / denominator  # kWh_sol/m²/yr
-    return round(threshold_Wh, 0)
+        return 800
+    threshold = em_bipv / denominator
+    if capped:
+        threshold = max(800, min(1200, threshold))
+    return round(threshold, 0)
+
+
+def calculate_thresholds_all_panels(em_grid: float) -> dict:
+    """Calculate capped threshold for all 4 panel types."""
+    return {
+        ptype: calculate_threshold(em_grid, ptype, capped=True)
+        for ptype in PV_PANEL_TYPES
+    }
+
+
+def calculate_thresholds_all_panels_uncapped(em_grid: float) -> dict:
+    """Calculate raw (uncapped) threshold for all 4 panel types."""
+    return {
+        ptype: calculate_threshold(em_grid, ptype, capped=False)
+        for ptype in PV_PANEL_TYPES
+    }
 
 
 def get_threshold_check(weather_header: str, cea_default: float = 800) -> dict:
@@ -175,14 +228,18 @@ def get_threshold_check(weather_header: str, cea_default: float = 800) -> dict:
             "error": f"Grid intensity not found for {country}"
         }
 
-    recommended = calculate_threshold(em_grid)
-    match = abs(recommended - cea_default) < 50  # within 50 kWh/m²/year tolerance
+    thresholds = calculate_thresholds_all_panels(em_grid)
+    thresholds_uncapped = calculate_thresholds_all_panels_uncapped(em_grid)
+    recommended = thresholds[DEFAULT_PANEL]
+    match = abs(recommended - cea_default) < 50
 
     return {
         "location": location,
         "country": country,
         "em_grid": em_grid,
         "recommended_threshold": recommended,
+        "thresholds_by_panel": thresholds,
+        "thresholds_uncapped": thresholds_uncapped,
         "cea_threshold": cea_default,
         "match": match,
         "error": None
