@@ -219,12 +219,18 @@ def get_acacia_curve(panel_type: str, em_grid: float, self_consumption: float = 
     sc_key   = _nearest_key(data[panel_key][grid_key], self_consumption)
     series   = data[panel_key][grid_key][sc_key]
 
+    all_sc = sorted([float(k) for k in data[panel_key][grid_key].keys()])
+    series_min = data[panel_key][grid_key][f"{all_sc[0]:.2f}"]
+    series_max = data[panel_key][grid_key][f"{all_sc[-1]:.2f}"]
+
     return {
-        "irradiance": np.array(series["Irradiance"]),
-        "impact":     np.array(series["Impact"]),
-        "panel_key":  panel_key,
-        "grid_key":   float(grid_key),
-        "sc_key":     float(sc_key),
+        "irradiance":  np.array(series["Irradiance"]),
+        "impact":      np.array(series["Impact"]),
+        "impact_min":  np.array(series_min["Impact"]),
+        "impact_max":  np.array(series_max["Impact"]),
+        "panel_key":   panel_key,
+        "grid_key":    float(grid_key),
+        "sc_key":      float(sc_key),
     }
 
 
