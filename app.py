@@ -427,6 +427,7 @@ def render_parameter_check(threshold_result, skill_id):
 
             # ACACIA curve — Altair chart with panel toggle
             acacia_curves = threshold_result.get("acacia_curves", {})
+            st.write(f"DEBUG: {list(acacia_curves.keys()) if acacia_curves else 'empty'}")
             if acacia_curves:
                 import altair as alt
                 panel_options = [p for p in run_pv_types if p in acacia_curves]
