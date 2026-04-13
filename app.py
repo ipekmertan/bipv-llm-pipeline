@@ -162,6 +162,23 @@ def extract_cea_zip(uploaded_file):
                 pv_config["panel_on_roof"] = bool(roof_area > 0)
                 pv_config["panel_on_wall"] = bool(wall_area > 0)
                 break
+        # Calculate self-consumption ratio from PV generation + demand files
+        sc = 0.5  # default
+        if pv_types_run:
+            import numpy as np
+            pv_df = result["files"].get(f"PV_{pv_types_run[0]}_total.csv")
+            if pv_df is not None:
+                gen_col = next((c for c in pv_df.columns if "E_PV_gen" in c or "E_PV" in c), None)
+                if gen_col:
+                    total_gen = pv_df[gen_col].sum()
+                    demand_dfs = [df for fname, df in result["files"].items()
+                                  if fname.startswith("B") and fname.endswith(".csv")
+                                  and len(fname) <= 10 and "E_sys_kWh" in df.columns]
+                    if demand_dfs and total_gen > 0:
+                        demand_series = sum(df["E_sys_kWh"].values for df in demand_dfs)
+                        if hasattr(demand_series, "__len__") and len(demand_series) == len(pv_df):
+                            sc = round(float(np.minimum(pv_df[gen_col].values, demand_series).sum() / total_gen), 3)
+        pv_config["self_consumption"] = sc
         result["pv_config"] = pv_config
     return result
 
@@ -286,27 +303,31 @@ def render_parameter_check(threshold_result, skill_id):
 
     # Simulation label
     if len(run_pv_types) == 1:
-        sim_label = f"Renewable Energy Potential Assessment<br>→ Photovoltaic ({run_pv_types[0]}: {PV_PANEL_TYPES.get(run_pv_types[0], {}).get('description', '')})"
+        sim_label = f'Photovoltaic simulation<br><span style="font-size:11px;color:#999;">{run_pv_types[0]} — {PV_PANEL_TYPES.get(run_pv_types[0], {}).get("description", "")}</span>'
     else:
         types_str = ", ".join([f"{p} ({PV_PANEL_TYPES.get(p,{}).get('description','')})" for p in run_pv_types])
-        sim_label = f"Renewable Energy Potential Assessment<br>→ Photovoltaic ({types_str})"
+        sim_label = f'Photovoltaic simulation<br><span style="font-size:11px;color:#999;">{types_str}</span>'
 
-    # Info text — show raw calculated value(s) and capped recommendation
+    # Info text — plain language, show raw + capped + explanation
+    pr_label = threshold_result.get("pr_label", "PR 0.75")
     if len(run_pv_types) == 1:
         raw = int(type_thresholds_uncapped.get(run_pv_types[0], recommended))
         cap = int(recommended)
         panel_name = PV_PANEL_TYPES.get(run_pv_types[0], {}).get("description", "")
         if raw == cap:
             info_text = (
-                f'For <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), '
-                f'the calculated threshold for {run_pv_types[0]} ({panel_name}) '
-                f'is <b>{raw} kWh/m&#x00B2;/year</b>.'
+                f'In <b>{city}, {country}</b>, a {panel_name} panel needs at least '
+                f'<b>{raw} kWh/m&#x00B2;/year</b> of sunlight to offset the carbon from its own manufacturing. '
+                f'Set this as your threshold in CEA.'
             )
         else:
             info_text = (
-                f'For <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), '
-                f'the formula gives {raw} kWh/m&#x00B2;/year for {run_pv_types[0]} ({panel_name}), '
-                f'capped to a practical maximum of <b>{cap} kWh/m&#x00B2;/year</b>.'
+                f'In <b>{city}, {country}</b>, the carbon math gives {raw} kWh/m&#x00B2;/year for a {panel_name} panel '
+                f'— but that would exclude almost every surface in practice, so it is capped at '
+                f'<b>{cap} kWh/m&#x00B2;/year</b>. '
+                f"This is because {country}'s grid is very clean ({em_grid} kgCO&#x2082;/kWh), "
+                f'making it hard for any panel to beat it on carbon. '
+                f'Set <b>{cap} kWh/m&#x00B2;/year</b> as your threshold in CEA.'
             )
     else:
         per_panel_str = " &bull; ".join([
@@ -314,11 +335,12 @@ def render_parameter_check(threshold_result, skill_id):
             for p in run_pv_types
         ])
         info_text = (
-            f'For <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), '
-            f'the calculated thresholds are: {per_panel_str}. '
-            f'Since CEA uses one threshold for all panel types, set it to '
-            f'the most conservative value (carbon-viable surfaces only): <b>{int(recommended)} kWh/m&#x00B2;/year</b> '
-            f'({max_ptype} — {driving_panel.get("description", "")}, highest embodied carbon).'
+            f'In <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), each panel type gives a different minimum: '
+            f'{per_panel_str}. '
+            f'Since CEA uses one value for all panels, use the strictest one — '
+            f'<b>{int(recommended)} kWh/m&#x00B2;/year</b> '
+            f'({max_ptype}, {driving_panel.get("description", "")} — highest manufacturing carbon, hardest to justify). '
+            f'This keeps only surfaces where every panel type earns its place.'
         )
 
     st.markdown("**Parameter check**")
@@ -461,7 +483,8 @@ if st.session_state.cea_data is None:
             st.session_state.param_check_hidden = False
             if "weather_header" in cea_data["files"]:
                 st.session_state.threshold_result = get_threshold_check(
-                    cea_data["files"]["weather_header"], cea_default=800
+                    cea_data["files"]["weather_header"], cea_default=800,
+                    self_consumption=cea_data.get("pv_config", {}).get("self_consumption", 0.5)
                 )
             st.rerun()
 
