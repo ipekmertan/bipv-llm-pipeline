@@ -64,6 +64,15 @@ def load_skills_index():
     with open(SKILLS_INDEX_PATH) as f:
         return json.load(f)["skills"]
 
+@st.cache_data(ttl=3600)
+def load_acacia_curves():
+    try:
+        r = requests.get("https://acacia.arch.ethz.ch/static/data/static_curve_data.json", timeout=15)
+        r.raise_for_status()
+        return r.json()
+    except Exception:
+        return None
+
 def load_skill_md(skill_id):
     for folder in SKILLS_DIR.iterdir():
         if folder.name.strip() == skill_id:
@@ -424,7 +433,6 @@ def render_parameter_check(threshold_result, skill_id):
 
             # ACACIA curve — Altair chart with panel toggle
             acacia_curves = threshold_result.get("acacia_curves", {})
-            st.write(f"DEBUG curves: {list(acacia_curves.keys())}, PV1 has impact: {'impact' in (acacia_curves.get('PV1') or {})}")
             if acacia_curves:
                 import altair as alt
                 panel_options = [p for p in run_pv_types if p in acacia_curves]
@@ -544,7 +552,8 @@ if st.session_state.cea_data is None:
             if "weather_header" in cea_data["files"]:
                 st.session_state.threshold_result = get_threshold_check(
                     cea_data["files"]["weather_header"], cea_default=800,
-                    self_consumption=cea_data.get("pv_config", {}).get("self_consumption", 0.5)
+                    self_consumption=cea_data.get("pv_config", {}).get("self_consumption", 0.5),
+                    acacia_data=load_acacia_curves()
                 )
             st.rerun()
 
@@ -823,4 +832,3 @@ else:
                     response = call_llm(system_prompt, st.session_state.chat_history)
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
                 st.rerun()
-
