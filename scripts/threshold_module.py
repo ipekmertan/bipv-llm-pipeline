@@ -44,7 +44,6 @@ PV_PANEL_TYPES = {
     },
 }
 
-# Maps CEA panel codes to ACACIA curve keys
 PANEL_TO_ACACIA = {
     "PV1": "monocrystalline",
     "PV2": "monocrystalline",
@@ -151,12 +150,7 @@ EPW_COUNTRY_MAP = {
 ACACIA_URL = "https://acacia.arch.ethz.ch/static/data/static_curve_data.json"
 
 def fetch_acacia_curves() -> dict | None:
-    """Load from local file if available, otherwise fetch from URL."""
     try:
-        local = Path(__file__).parent / "static_curve_data.json"
-        if local.exists():
-            with open(local) as f:
-                return json.load(f)
         r = requests.get(ACACIA_URL, timeout=15)
         r.raise_for_status()
         return r.json()
@@ -167,9 +161,9 @@ def _nearest_key(obj: dict, value: float) -> str:
     keys = sorted([float(k) for k in obj.keys()])
     return f"{min(keys, key=lambda k: abs(k - value)):.2f}"
 
-def get_acacia_curve(panel_type: str, em_grid: float, self_consumption: float = 0.5) -> dict | None:
-    """Get LCA impact curve for panel type and grid emissions."""
-    data = fetch_acacia_curves()
+def get_acacia_curve(panel_type: str, em_grid: float, self_consumption: float = 0.5,
+                     acacia_data: dict = None) -> dict | None:
+    data = acacia_data or fetch_acacia_curves()
     if data is None:
         return None
     acacia_key = PANEL_TO_ACACIA.get(panel_type, "monocrystalline")
@@ -257,7 +251,7 @@ def calculate_thresholds_all_panels_uncapped(em_grid: float) -> dict:
     }
 
 
-def get_threshold_check(weather_header: str, cea_default: float = 800, self_consumption: float = 0.5) -> dict:
+def get_threshold_check(weather_header: str, cea_default: float = 800, self_consumption: float = 0.5, acacia_data: dict = None) -> dict:
     """
     Full threshold check for a given location.
     Returns dict with all info needed to render the UI boxes.
@@ -285,7 +279,7 @@ def get_threshold_check(weather_header: str, cea_default: float = 800, self_cons
 
     acacia_curves = {}
     for ptype in PV_PANEL_TYPES:
-        curve = get_acacia_curve(ptype, em_grid, self_consumption)
+        curve = get_acacia_curve(ptype, em_grid, self_consumption, acacia_data=acacia_data)
         if curve:
             acacia_curves[ptype] = curve
 
