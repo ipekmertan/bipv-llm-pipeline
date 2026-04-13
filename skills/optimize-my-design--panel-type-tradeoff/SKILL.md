@@ -16,38 +16,11 @@ Unlike a generic panel comparison, this skill uses the **actual simulation resul
 
 ---
 
-## CEA4 Integration
+## File Source
 
-This skill runs as a CEA4 plugin. All data is read automatically via the CEA4 `InputLocator`.
+This skill reads from the uploaded CEA project zip. The app finds the relevant files automatically by filename — no manual file selection needed.
 
-**Location context** read automatically from project weather file:
-```python
-locator.get_weather()  # → city, latitude, longitude
-```
-
-**PV yield data per panel type** accessed via InputLocator:
-```python
-locator.get_pv_results(panel_type="PV1")  # → PV_PV1_total_buildings.csv
-locator.get_pv_results(panel_type="PV2")  # → PV_PV2_total_buildings.csv
-locator.get_pv_results(panel_type="PV3")  # → PV_PV3_total_buildings.csv
-locator.get_pv_results(panel_type="PV4")  # → PV_PV4_total_buildings.csv
-```
-
-**Panel database** accessed via InputLocator:
-```python
-locator.get_database_conversion_systems()
-# → database/COMPONENTS/CONVERSION/PHOTOVOLTAIC_PANELS.csv
-# Contains: efficiency, cost, embodied carbon, lifetime per panel type
-```
-
-**Emissions offset per panel type** accessed via InputLocator:
-```python
-locator.get_operational_emissions()
-# → operational_emissions_annually_buildings.csv
-# PV_PV{n}_GRID_offset[kgCO2e] — carbon avoided per panel type
-```
-
----
+**Location context** is taken from the project's weather file (`.epw`) found inside the zip.
 
 ## Data Sources
 
@@ -196,3 +169,28 @@ CdTe (PV3) consistently offers the best balance of efficiency, cost, and embodie
 - IDP 2024 Team 2: panel type comparison showing CdTe offsets embodied emissions within one year
 - Interview — Interviewee B: selected CdTe based on irradiation, demand, and self-consumption analysis
 - Interview — Interviewee C: explicitly questioned whether panel type choice made a meaningful difference — this skill answers that directly
+
+---
+
+## Radiation Threshold & Panel Type
+
+CEA applies a single `annual-radiation-threshold` parameter to **all panel types simultaneously** during a simulation run. This matters because each panel type has a different embodied carbon, which means the carbon-break-even irradiation threshold differs per type:
+
+| Panel | Embodied Carbon | Threshold (Switzerland, 0.042 kgCO₂/kWh) | Threshold (Singapore, 0.408 kgCO₂/kWh) |
+|-------|----------------|------------------------------------------|------------------------------------------|
+| PV1 (cSi) | 255.8 kgCO₂/m² | 1200 kWh/m²/year (capped) | 800 kWh/m²/year (capped) |
+| PV2 (mcSi) | 191.2 kgCO₂/m² | 1200 kWh/m²/year (capped) | 800 kWh/m²/year (capped) |
+| PV3 (CdTe) | 47.6 kgCO₂/m² | 800 kWh/m²/year | 800 kWh/m²/year |
+| PV4 (CIGS) | 75.9 kgCO₂/m² | ~970 kWh/m²/year | 800 kWh/m²/year |
+
+**Formula (Happle et al. 2019):**
+`I_threshold = EmBIPV / (em_grid × η × PR × LT)`
+
+Where PR = 0.75 and LT = 25yr (Galimshina et al. 2024).
+
+**When multiple panel types are run together:** CEA uses one threshold for all. The app recommends setting the threshold to the **highest value among the simulated panel types**. Alternatively, run each panel type in a separate CEA simulation with its own threshold.
+
+**Sources:**
+- Happle et al. (2019). J. Phys.: Conf. Ser. 1343, 012077.
+- Galimshina et al. (2024). Renewable Energy 236, 121404.
+- McCarty et al. (2025). Renew. Sustain. Energy Rev. 211, 115326.
