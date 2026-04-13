@@ -330,18 +330,26 @@ def render_parameter_check(threshold_result, skill_id):
                 f'Set <b>{cap} kWh/m&#x00B2;/year</b> as your threshold in CEA.'
             )
     else:
-        per_panel_str = " &bull; ".join([
-            f'{p}: {int(type_thresholds_uncapped.get(p, type_thresholds[p]))} kWh/m&#x00B2;/yr'
-            for p in run_pv_types
-        ])
-        info_text = (
-            f'In <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), each panel type gives a different minimum: '
-            f'{per_panel_str}. '
-            f'Since CEA uses one value for all panels, use the strictest one — '
-            f'<b>{int(recommended)} kWh/m&#x00B2;/year</b> '
-            f'({max_ptype}, {driving_panel.get("description", "")} — highest manufacturing carbon, hardest to justify). '
-            f'This keeps only surfaces where every panel type earns its place.'
-        )
+        raw_strictest = int(type_thresholds_uncapped.get(max_ptype, recommended))
+        cap_strictest = int(recommended)
+        if raw_strictest == cap_strictest:
+            info_text = (
+                f'In <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), each panel type gives a different minimum. '
+                f'Since CEA uses one value for all panels, use the strictest one — '
+                f'<b>{raw_strictest} kWh/m&#x00B2;/year</b> '
+                f'({max_ptype}, {driving_panel.get("description", "")} — highest manufacturing carbon, hardest to justify). '
+                f'Set this as your threshold in CEA.'
+            )
+        else:
+            info_text = (
+                f'In <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), each panel type gives a different minimum. '
+                f'The strictest panel ({max_ptype}, {driving_panel.get("description", "")}) gives a raw value of '
+                f'{raw_strictest} kWh/m&#x00B2;/year — but that would exclude almost every surface in practice, '
+                f'so it is capped at <b>{cap_strictest} kWh/m&#x00B2;/year</b>. '
+                f"This is because {country}'s grid is very clean ({em_grid} kgCO&#x2082;/kWh), "
+                f'making it hard for any panel to beat it on carbon. '
+                f'Set <b>{cap_strictest} kWh/m&#x00B2;/year</b> as your threshold in CEA.'
+            )
 
     st.markdown("**Parameter check**")
 
@@ -420,12 +428,31 @@ def render_parameter_check(threshold_result, skill_id):
                 f'CEA\'s default of 800 kWh/m&sup2;/year was set for carbon-intensive grids '
                 f'like Southeast Asia and is often too low for Europe.'
                 f'{panel_section}'
-                f'<br><span style="font-size:11px;color:#aaa;margin-top:6px;display:block;font-style:italic;">'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+
+            # ACACIA curve for the driving panel
+            acacia_curves = threshold_result.get("acacia_curves", {})
+            curve = acacia_curves.get(max_ptype) or (list(acacia_curves.values())[0] if acacia_curves else None)
+            if curve is not None:
+                irr = curve["irradiance"] if isinstance(curve["irradiance"], list) else curve["irradiance"].tolist()
+                imp = curve["impact"] if isinstance(curve["impact"], list) else curve["impact"].tolist()
+                chart_df = pd.DataFrame({
+                    "Annual irradiance (kWh/m²/year)": irr,
+                    "Carbon intensity (kgCO₂eq/kWh)": imp
+                }).set_index("Annual irradiance (kWh/m²/year)")
+                # Only show up to 1400 kWh/m²/year
+                chart_df = chart_df[chart_df.index <= 1400]
+                st.caption(f"Carbon intensity of {PV_PANEL_TYPES.get(max_ptype,{}).get('description', max_ptype)} electricity vs. irradiance — threshold is where the curve meets the grid ({em_grid} kgCO₂/kWh)")
+                st.line_chart(chart_df, height=180)
+
+            st.markdown(
+                f'<span style="font-size:11px;color:#aaa;margin-top:6px;display:block;font-style:italic;">'
                 f'Happle et al. (2019). J. Phys.: Conf. Ser. 1343, 012077. &bull; '
                 f'Galimshina et al. (2024). Renew. Energy 236, 121404. &bull; '
                 f'McCarty et al. (2025a). RSER 211, 115326. &bull; '
-                f'McCarty et al. (2025b). J. Phys.: Conf. Ser. 3140, 032006.</span>'
-                f'</div>',
+                f'McCarty et al. (2025b). J. Phys.: Conf. Ser. 3140, 032006.</span>',
                 unsafe_allow_html=True
             )
 
