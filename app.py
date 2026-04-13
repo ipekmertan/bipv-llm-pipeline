@@ -221,54 +221,79 @@ def render_parameter_check(threshold_result, skill_id):
     city = threshold_result["location"]["city"]
     country = threshold_result["country"]
     em_grid = threshold_result["em_grid"]
-    recommended = threshold_result["recommended_threshold"]
-    cea_default = threshold_result["cea_threshold"]
-    match = threshold_result["match"]
+    thresholds = threshold_result.get("thresholds_by_panel", {})
 
-    # Build parameter rows based on which simulations this skill uses
-    rows = []
+    # Only show parameter check for skills that use PV simulations
+    if simulations is not None and "pv" not in simulations:
+        st.markdown(
+            '<div style="background:#f0fff4;border:1px solid #b2dfdb;border-radius:8px;'
+            'padding:10px 14px;font-size:12.5px;color:#2e7d52;margin-bottom:12px;">'
+            '✓ All parameter inputs look correct for this analysis.</div>',
+            unsafe_allow_html=True
+        )
+        return
 
-    if simulations is None or "pv" in simulations or "solar_irradiation" in simulations:
-        if "pv" in (simulations or []) or simulations is None:
-            status = "correct" if match else "wrong"
-            tooltip = "✓ Looks correct" if match else "Seems incorrect — please update in CEA"
+    # Detect which PV types were actually run (presence of PV_PVx_total.csv)
+    cea_data = st.session_state.get("cea_data", {})
+    available_files = cea_data.get("files", {}) if cea_data else {}
+    run_pv_types = [
+        ptype for ptype in ["PV1", "PV2", "PV3", "PV4"]
+        if f"PV_{ptype}_total.csv" in available_files
+    ]
+    if not run_pv_types:
+        run_pv_types = list(thresholds.keys())
+
+    from threshold_module import PV_PANEL_TYPES
+
+    # Find the most inclusive (lowest) threshold across all detected panel types
+    # — lower threshold = more surfaces qualify for at least one panel type
+    thresholds_uncapped = threshold_result.get("thresholds_uncapped", {})
+    type_thresholds = {p: thresholds.get(p, 1200) for p in run_pv_types}
+    type_thresholds_uncapped = {p: thresholds_uncapped.get(p, 1200) for p in run_pv_types}
+    min_ptype = min(type_thresholds, key=lambda p: type_thresholds[p])
+    recommended = type_thresholds[min_ptype]
+    driving_panel = PV_PANEL_TYPES.get(min_ptype, {})
+
+    # Simulation label
+    if len(run_pv_types) == 1:
+        sim_label = f"Renewable Energy Potential Assessment<br>→ Photovoltaic ({run_pv_types[0]}: {PV_PANEL_TYPES.get(run_pv_types[0], {}).get('description', '')})"
+    else:
+        types_str = ", ".join([f"{p} ({PV_PANEL_TYPES.get(p,{}).get('description','')})" for p in run_pv_types])
+        sim_label = f"Renewable Energy Potential Assessment<br>→ Photovoltaic ({types_str})"
+
+    # Info text — show raw calculated value(s) and capped recommendation
+    if len(run_pv_types) == 1:
+        raw = int(type_thresholds_uncapped[run_pv_types[0]])
+        cap = int(recommended)
+        panel_name = PV_PANEL_TYPES.get(run_pv_types[0], {}).get("description", "")
+        if raw == cap:
+            info_text = (
+                f'For <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), '
+                f'the calculated threshold for {run_pv_types[0]} ({panel_name}) '
+                f'is <b>{raw} kWh/m&#x00B2;/year</b> — set this value in CEA.'
+            )
         else:
-            status = "unverifiable"
-            tooltip = "Cannot verify — check this value in CEA"
-
-        rows.append({
-            "simulation": "Renewable Energy Potential Assessment<br>→ Photovoltaic (PV) Panels",
-            "parameter": "annual-radiation-threshold",
-            "recommended": f"{int(recommended)} kWh/m²/year",
-            "tooltip": tooltip,
-            "status": status,
-            "key": "row_pv_threshold"
-        })
-
-    if not rows:
-        st.markdown(
-            '<div style="background:#f0fff4;border:1px solid #b2dfdb;border-radius:8px;'
-            'padding:10px 14px;font-size:12.5px;color:#2e7d52;margin-bottom:12px;">'
-            '✓ All parameter inputs look correct for this analysis.</div>',
-            unsafe_allow_html=True
+            info_text = (
+                f'For <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), '
+                f'the calculated threshold for {run_pv_types[0]} ({panel_name}) '
+                f'is {raw} kWh/m&#x00B2;/year (capped to <b>{cap} kWh/m&#x00B2;/year</b> '
+                f'for practical use) — set this value in CEA.'
+            )
+    else:
+        per_panel_str = " &bull; ".join([
+            f'{p}: {int(type_thresholds_uncapped[p])} kWh/m&#x00B2;/yr'
+            for p in run_pv_types
+        ])
+        info_text = (
+            f'For <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), '
+            f'the calculated thresholds are: {per_panel_str}. '
+            f'Since CEA uses one threshold for all panel types, set it to '
+            f'the most conservative (capped): <b>{int(recommended)} kWh/m&#x00B2;/year</b> '
+            f'(driven by {min_ptype}, lowest embodied carbon — most surfaces qualify).'
         )
-        return
 
-    # Check if all correct
-    all_correct = all(r["status"] == "correct" for r in rows)
-    if all_correct:
-        st.markdown(
-            '<div style="background:#f0fff4;border:1px solid #b2dfdb;border-radius:8px;'
-            'padding:10px 14px;font-size:12.5px;color:#2e7d52;margin-bottom:12px;">'
-            '✓ All parameter inputs look correct for this analysis.</div>',
-            unsafe_allow_html=True
-        )
-        return
-
-    # Show table
     st.markdown("**Parameter check**")
 
-    # Header
     h1, h2, h3, h4 = st.columns([2.5, 2, 2, 4])
     for col, label in zip([h1, h2, h3, h4], ["Simulation", "Parameter", "Recommended value", "Info"]):
         with col:
@@ -279,56 +304,70 @@ def render_parameter_check(threshold_result, skill_id):
             )
     st.markdown('<hr style="margin:4px 0 8px 0;border:none;border-top:1.5px solid #e0e0e0;">', unsafe_allow_html=True)
 
-    for row in rows:
-        c1, c2, c3, c4 = st.columns([2.5, 2, 2, 4])
-        with c1:
-            st.markdown(row["simulation"], unsafe_allow_html=True)
-        with c2:
-            st.markdown(f'`{row["parameter"]}`')
-        with c3:
-            bg = "#fff0f0" if row["status"] == "wrong" else "#e3f2fd"
-            border = "#ffcccc" if row["status"] == "wrong" else "#90caf9"
+    c1, c2, c3, c4 = st.columns([2.5, 2, 2, 4])
+    with c1:
+        st.markdown(sim_label, unsafe_allow_html=True)
+    with c2:
+        st.markdown("`annual-radiation-threshold`")
+    with c3:
+        st.markdown(
+            f'<div style="background:#e3f2fd;border:1px solid #90caf9;border-radius:6px;'
+            f'padding:6px 10px;font-size:13px;cursor:default;" '
+            f'title="Cannot verify — check this value in CEA">'
+            f'<b>{int(recommended)} kWh/m&#x00B2;/year</b></div>',
+            unsafe_allow_html=True
+        )
+    with c4:
+        st.markdown(info_text, unsafe_allow_html=True)
+        if st.button(
+            "Reasoning →" if not st.session_state.get("reasoning_threshold") else "Reasoning ↑",
+            key="btn_threshold"
+        ):
+            st.session_state["reasoning_threshold"] = not st.session_state.get("reasoning_threshold", False)
+            st.rerun()
+
+        if st.session_state.get("reasoning_threshold"):
+            if len(run_pv_types) > 1:
+                panel_table = "".join([
+                    f'<tr><td style="padding:2px 8px;">{p}</td>'
+                    f'<td style="padding:2px 8px;">{PV_PANEL_TYPES.get(p,{}).get("description","")}</td>'
+                    f'<td style="padding:2px 8px;">{PV_PANEL_TYPES.get(p,{}).get("em_bipv","")} kgCO&#x2082;/m&#x00B2;</td>'
+                    f'<td style="padding:2px 8px;"><b>{int(type_thresholds[p])} kWh/m&#x00B2;/yr</b></td></tr>'
+                    for p in run_pv_types
+                ])
+                panel_section = (
+                    f'<p style="font-size:12px;margin:8px 0 4px 0;"><strong>Thresholds by panel type (your simulation):</strong></p>'
+                    f'<table style="font-size:11px;color:#555;border-collapse:collapse;">'
+                    f'<tr style="color:#999;"><td style="padding:2px 8px;">Type</td><td style="padding:2px 8px;">Technology</td>'
+                    f'<td style="padding:2px 8px;">Embodied carbon</td><td style="padding:2px 8px;">Threshold</td></tr>'
+                    f'{panel_table}</table>'
+                    f'<p style="font-size:11px;color:#777;margin:6px 0 0 0;">CEA applies one threshold to all panel types — '
+                    f'the most conservative value ({int(recommended)} kWh/m&#x00B2;/year) is used.</p>'
+                )
+            else:
+                panel_section = ""
+
             st.markdown(
-                f'<div style="background:{bg};border:1px solid {border};border-radius:6px;'
-                f'padding:6px 10px;font-weight:600;font-size:13px;cursor:default;" '
-                f'title="{row["tooltip"]}">'
-                f'{row["recommended"]}</div>',
-                unsafe_allow_html=True
-            )
-        with c4:
-            st.markdown(
-                f'<div style="font-size:13px;line-height:1.6;color:#444;">'
-                f'For <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), '
-                f'the radiation threshold should be set to <b>{int(recommended)} kWh/m&sup2;/year</b>'
+                f'<div style="background:#f7f7f7;border:1px solid #e8e8e8;border-radius:8px;'
+                f'padding:12px 14px;margin-top:8px;font-size:12px;color:#555;line-height:1.65;">'
+                f'The radiation threshold is calculated using <strong>Happle et al. (2019)</strong> — '
+                f'the annual irradiation at which BIPV electricity carbon emissions equal the local grid intensity. '
+                f'For <strong>{country}</strong> (grid: <strong>{em_grid} kgCO&#x2082;/kWh</strong>), '
+                f'a cleaner grid means only high-irradiation surfaces are carbon-competitive — hence a higher threshold. '
+                f'Embodied carbon values are taken from the CEA panel database (Galimshina et al. 2024, ETH Zürich). '
+                f'CEA&#x27;s default of 800 kWh/m&sup2;/year was defined for carbon-intensive grids and is widely '
+                f'acknowledged as location-specific and often misapplied (McCarty et al. 2025). '
+                f'The value is capped between 800–1200 kWh/m&sup2;/year — the practical range for BIPV analysis.'
+                f'{panel_section}'
+                f'<br><span style="font-size:11px;color:#aaa;margin-top:6px;display:block;font-style:italic;">'
+                f'Happle et al. (2019). J. Phys.: Conf. Ser. 1343, 012077. &bull; '
+                f'Galimshina et al. (2024). Renew. Energy 236, 121404. &bull; '
+                f'McCarty et al. (2025). Renew. Sustain. Energy Rev. 211, 115326.</span>'
                 f'</div>',
                 unsafe_allow_html=True
             )
-            if st.button(
-                "Reasoning →" if not st.session_state.get(f"reasoning_{row['key']}") else "Reasoning ↑",
-                key=f"btn_{row['key']}"
-            ):
-                k = f"reasoning_{row['key']}"
-                st.session_state[k] = not st.session_state.get(k, False)
-                st.rerun()
 
-            if st.session_state.get(f"reasoning_{row['key']}"):
-                st.markdown(
-                    f'<div style="background:#f7f7f7;border:1px solid #e8e8e8;border-radius:8px;'
-                    f'padding:12px 14px;margin-top:8px;font-size:12px;color:#555;line-height:1.65;">'
-                    f'The radiation threshold is calculated using <strong>Happle et al. (2019)</strong> — '
-                    f'the threshold is the irradiation level at which BIPV electricity carbon emissions '
-                    f'equal the local grid intensity. For <strong>{country}</strong> '
-                    f'(grid: <strong>{em_grid} kgCO&#x2082;/kWh</strong>), a cleaner grid means only '
-                    f'high-irradiation surfaces are carbon-competitive. '
-                    f"CEA's default of 800 kWh/m&sup2;/year was designed for carbon-intensive grids like Southeast Asia."
-                    f'<br><span style="font-size:11px;color:#aaa;margin-top:6px;display:block;font-style:italic;">'
-                    f'Happle, G. et al. (2019). J. Phys.: Conf. Ser. 1343, 012077.</span>'
-                    f'</div>',
-                    unsafe_allow_html=True
-                )
-
-        st.markdown('<hr style="margin:4px 0;border:none;border-top:1px solid #f0f0f0;">', unsafe_allow_html=True)
-
+    st.markdown('<hr style="margin:4px 0;border:none;border-top:1px solid #f0f0f0;">', unsafe_allow_html=True)
     st.markdown(
         '<div style="background:#fff8e1;color:#7c5e00;border:1px solid #ffe082;'
         'border-radius:8px;padding:10px 14px;font-size:12.5px;margin-top:4px;">'
@@ -338,20 +377,6 @@ def render_parameter_check(threshold_result, skill_id):
     )
     st.markdown("")
 
-
-# ── Session state ──────────────────────────────────────────────────────────────
-for k, v in [("cea_data", None), ("chat_history", []),
-              ("tree_scale", None), ("tree_goal", None), ("tree_sub", None),
-              ("tree_subsub", None), ("tree_mode", None),
-              ("skill_id", None), ("skill_name", None),
-              ("analysis_ran", False), ("threshold_result", None),
-              ("param_check_hidden", False),
-              ("selected_building", None), ("selected_cluster", []),
-              ("reasoning_open", False)]:
-    if k not in st.session_state:
-        st.session_state[k] = v
-
-skills = load_skills_index()
 
 def build_tree():
     tree = {}
@@ -670,4 +695,5 @@ else:
                     response = call_llm(system_prompt, st.session_state.chat_history)
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
                 st.rerun()
+
 
