@@ -20,24 +20,11 @@ It covers:
 
 ---
 
-## CEA4 Integration
+## File Source
 
-This skill runs as a CEA4 plugin. All data is read automatically via the CEA4 `InputLocator`.
+This skill reads from the uploaded CEA project zip. The app finds the relevant files automatically by filename — no manual file selection needed.
 
-**Location context** read automatically from project weather file:
-```python
-locator.get_weather()  # → city, latitude, longitude, hemisphere
-```
-
-**PV yield data** accessed via InputLocator:
-```python
-locator.get_pv_results(panel_type="PV1")
-# → PV_PV1_total.csv (8760 hourly rows, district level)
-# → PV_PV1_total_buildings.csv (annual totals per building)
-# Repeated for PV2, PV3, PV4 if simulated
-```
-
----
+**Location context** is taken from the project's weather file (`.epw`) found inside the zip.
 
 ## Data Sources
 
@@ -170,3 +157,18 @@ locator.get_pv_results(panel_type="PV1")
 - IDP 2024 Team 8: PV electricity generation aggregated by building type with seasonal breakdown
 - Interview — Interviewee B: "Annual PV generation (roof/facade/building)" as primary output; also wanted daily/seasonal profiles
 - Interview — Interviewee D: "Building-specific total energy production, energy per surface area, hourly production"
+
+---
+
+## Radiation Threshold — Parameter Check Context
+
+The `annual-radiation-threshold` in CEA determines which surfaces are included in the PV simulation. The app's parameter check computes the recommended threshold per panel type using:
+
+`I_threshold = EmBIPV / (em_grid × η × PR × LT)` (Happle et al. 2019), capped between 800–1200 kWh/m²/year.
+
+Embodied carbon values (kgCO₂/m²) are read directly from the project's `PHOTOVOLTAIC_PANELS.csv`:
+- PV1 (cSi): 255.8 — PV2 (mcSi): 191.2 — PV3 (CdTe): 47.6 — PV4 (CIGS): 75.9
+
+When multiple panel types are run together, CEA applies **one threshold to all**. The parameter check shows the recommended threshold per panel type and advises setting it to the highest value among the simulated types, or running separately per type.
+
+**Sources:** Happle et al. (2019). J. Phys.: Conf. Ser. 1343, 012077. · Galimshina et al. (2024). Renewable Energy 236, 121404. · McCarty et al. (2025). Renew. Sustain. Energy Rev. 211, 115326.
