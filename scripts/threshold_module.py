@@ -224,10 +224,10 @@ def get_acacia_curve(panel_type: str, em_grid: float, self_consumption: float = 
     series_max = data[panel_key][grid_key][f"{all_sc[-1]:.2f}"]
 
     return {
-        "irradiance":  np.array(series["Irradiance"]),
-        "impact":      np.array(series["Impact"]),
-        "impact_min":  np.array(series_min["Impact"]),
-        "impact_max":  np.array(series_max["Impact"]),
+        "irradiance":  [float(x) for x in series["Irradiance"]],
+        "impact":      [float(x) for x in series["Impact"]],
+        "impact_min":  [float(x) for x in series_min["Impact"]],
+        "impact_max":  [float(x) for x in series_max["Impact"]],
         "panel_key":   panel_key,
         "grid_key":    float(grid_key),
         "sc_key":      float(sc_key),
@@ -423,3 +423,4 @@ if __name__ == "__main__":
     if result["mccarty"]:
         print(f"McCarty closest location: {result['mccarty']['location']}")
         print(f"McCarty CPP 10yr: {result['mccarty']['cpp_10yr']} kWh/m²/year")
+
