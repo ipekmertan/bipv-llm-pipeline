@@ -432,20 +432,50 @@ def render_parameter_check(threshold_result, skill_id):
                 unsafe_allow_html=True
             )
 
-            # ACACIA curve for the driving panel
+            # ACACIA curve — Altair chart with panel toggle
             acacia_curves = threshold_result.get("acacia_curves", {})
-            curve = acacia_curves.get(max_ptype) or (list(acacia_curves.values())[0] if acacia_curves else None)
-            if curve is not None:
-                irr = curve["irradiance"] if isinstance(curve["irradiance"], list) else curve["irradiance"].tolist()
-                imp = curve["impact"] if isinstance(curve["impact"], list) else curve["impact"].tolist()
-                chart_df = pd.DataFrame({
-                    "Annual irradiance (kWh/m²/year)": irr,
-                    "Carbon intensity (kgCO₂eq/kWh)": imp
-                }).set_index("Annual irradiance (kWh/m²/year)")
-                # Only show up to 1400 kWh/m²/year
-                chart_df = chart_df[chart_df.index <= 1400]
-                st.caption(f"Carbon intensity of {PV_PANEL_TYPES.get(max_ptype,{}).get('description', max_ptype)} electricity vs. irradiance — threshold is where the curve meets the grid ({em_grid} kgCO₂/kWh)")
-                st.line_chart(chart_df, height=180)
+            if acacia_curves:
+                import altair as alt
+                panel_options = [p for p in run_pv_types if p in acacia_curves]
+                if not panel_options:
+                    panel_options = list(acacia_curves.keys())[:1]
+                selected_curve_panel = st.radio(
+                    "Panel type",
+                    options=panel_options,
+                    format_func=lambda p: f"{p} — {PV_PANEL_TYPES.get(p,{}).get('description', p)}",
+                    horizontal=True,
+                    key="curve_panel_toggle"
+                )
+                curve = acacia_curves.get(selected_curve_panel)
+                if curve is not None:
+                    irr = curve["irradiance"] if isinstance(curve["irradiance"], list) else curve["irradiance"].tolist()
+                    imp = curve["impact"] if isinstance(curve["impact"], list) else curve["impact"].tolist()
+                    chart_df = pd.DataFrame({"irradiance": irr, "impact": imp})
+                    chart_df = chart_df[(chart_df["irradiance"] <= 1000) & (chart_df["impact"] <= 2.0)]
+
+                    area = alt.Chart(chart_df).mark_area(
+                        color="#f5a623", opacity=0.35
+                    ).encode(
+                        x=alt.X("irradiance:Q", title="Annual irradiance (kWh/sqm/a)",
+                                scale=alt.Scale(domain=[0, 1000])),
+                        y=alt.Y("impact:Q", title="Device intensity (kgCO2e/kWh)",
+                                scale=alt.Scale(domain=[0, 2.0]))
+                    )
+                    line = alt.Chart(chart_df).mark_line(
+                        color="#c07800", strokeWidth=2
+                    ).encode(
+                        x="irradiance:Q",
+                        y="impact:Q"
+                    )
+                    grid_df = pd.DataFrame({"y": [em_grid]})
+                    grid_line = alt.Chart(grid_df).mark_rule(
+                        color="black", strokeWidth=1.5
+                    ).encode(y="y:Q")
+
+                    chart = (area + line + grid_line).properties(height=220).configure_axis(
+                        grid=True, gridColor="#e0e0e0", gridDash=[4, 4]
+                    ).configure_view(strokeWidth=0)
+                    st.altair_chart(chart, use_container_width=True)
 
             st.markdown(
                 f'<span style="font-size:11px;color:#aaa;margin-top:6px;display:block;font-style:italic;">'
