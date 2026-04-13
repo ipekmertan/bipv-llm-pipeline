@@ -1,714 +1,585 @@
-import streamlit as st
-import zipfile
-import json
-import os
-import io
-import tempfile
-import pandas as pd
-from pathlib import Path
-import requests
-import sys
-sys.path.append(str(Path(__file__).parent / "scripts"))
-from threshold_module import get_threshold_check, THRESHOLD_RELEVANT_SKILLS
+"""
+BIPV Analyst — Streamlit web app
+Reads a CEA project zip, extracts grid emissions + self-consumption automatically,
+fetches ACACIA LCA curves, and presents threshold analysis grounded in
+McCarty et al. 2025 and Happle et al. 2019.
+"""
 
-# Map each skill to the simulations whose parameters need checking
-SKILL_SIMULATION_MAP = {
-    # Solar Irradiation only
-    "site-potential--solar-availability--surface-irradiation": ["solar_irradiation"],
-    "site-potential--solar-availability--temporal-availability--seasonal-patterns": ["solar_irradiation"],
-    "site-potential--solar-availability--temporal-availability--daily-patterns": ["solar_irradiation"],
-    "site-potential--envelope-suitability": ["solar_irradiation"],
-    "site-potential--massing-and-shading-strategy": ["solar_irradiation"],
-    # PV Yield only
-    "performance-estimation--energy-generation": ["pv"],
-    "optimize-my-design--panel-type-tradeoff": ["pv"],
-    "optimize-my-design--surface-prioritization": ["pv"],
-    "optimize-my-design--envelope-simplification": ["pv"],
-    "optimize-my-design--construction-and-integration": ["pv"],
-    # PV + Demand
-    "performance-estimation--self-sufficiency": ["pv", "demand"],
-    "impact-and-viability--carbon-impact--operational-carbon-footprint": ["pv", "demand"],
-    "impact-and-viability--carbon-impact--carbon-payback": ["pv", "demand"],
-    "impact-and-viability--economic-viability--cost-analysis": ["pv", "demand"],
-    "impact-and-viability--economic-viability--investment-payback": ["pv", "demand"],
-    # No parameter check
-    "site-potential--contextual-feasibility--infrastructure-readiness": [],
-    "site-potential--contextual-feasibility--regulatory-constraints": [],
-    "site-potential--contextual-feasibility--basic-economic-signal": [],
+import io
+import os
+import json
+import zipfile
+import tempfile
+import requests
+import numpy as np
+import pandas as pd
+import streamlit as st
+import anthropic
+
+# ── Config ──────────────────────────────────────────────────────────────────
+
+ACACIA_CURVE_URL = "https://acacia.arch.ethz.ch/static/data/static_curve_data.json"
+SKILLS_DIR = os.path.join(os.path.dirname(__file__), "skills")
+SKILLS_INDEX = os.path.join(os.path.dirname(__file__), "configuration", "skills-index.json")
+
+# Grid emissions conversion: CEA stores kgCO2/MJ in GRID.csv
+# 1 kWh = 3.6 MJ → multiply by 3.6 to get kgCO2/kWh
+MJ_TO_KWH = 3.6
+
+# McCarty 2025 — threshold table (location × technology × metric)
+# Values in kWh/m²/year
+MCCARTY_THRESHOLDS = {
+    "singapore": {
+        "grid_kgco2_kwh": 0.566,
+        "csi":  {"yspec": 524, "carbon_intensity": 137, "cpp_10yr": 325},
+        "cdte": {"yspec": 500, "carbon_intensity": 65,  "cpp_10yr": 155},
+        "opv":  {"yspec": 506, "carbon_intensity": 116, "cpp_10yr": 274},
+    },
+    "hamburg": {
+        "grid_kgco2_kwh": 0.298,
+        "csi":  {"yspec": 522, "carbon_intensity": 227, "cpp_10yr": 730},
+        "cdte": {"yspec": 503, "carbon_intensity": 110, "cpp_10yr": 351},
+        "opv":  {"yspec": 500, "carbon_intensity": 199, "cpp_10yr": 638},
+    },
+    "zurich": {
+        "grid_kgco2_kwh": 0.046,
+        "csi":  {"yspec": 500, "carbon_intensity": 1405, "cpp_10yr": 4512},
+        "cdte": {"yspec": 504, "carbon_intensity": 678,  "cpp_10yr": 2184},
+        "opv":  {"yspec": 500, "carbon_intensity": 1219, "cpp_10yr": 3930},
+    },
 }
 
-st.set_page_config(page_title="BIPV Analyst", page_icon="☀️", layout="wide")
+# CEA panel database (McCarty IDP lecture + CEA PHOTOVOLTAIC_PANELS.csv)
+PANEL_DB = {
+    "PV1": {"tech": "cSi",  "label": "Crystalline Silicon",   "efficiency": 0.185, "embodied_kgco2_m2": 255.8, "cost_roof": 254.72, "cost_facade": 345.72, "acacia_key": "monocrystalline"},
+    "PV2": {"tech": "mcSi", "label": "Monocrystalline Silicon","efficiency": 0.175, "embodied_kgco2_m2": 191.2, "cost_roof": 238.58, "cost_facade": 329.58, "acacia_key": "monocrystalline"},
+    "PV3": {"tech": "CdTe", "label": "Cadmium-Telluride",      "efficiency": 0.176, "embodied_kgco2_m2": 47.6,  "cost_roof": 239.54, "cost_facade": 330.54, "acacia_key": "cdte"},
+    "PV4": {"tech": "CIGS", "label": "CIGS",                   "efficiency": 0.099, "embodied_kgco2_m2": 75.9,  "cost_roof": 265.06, "cost_facade": 356.06, "acacia_key": "cigs"},
+}
 
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
-html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-h1, h2, h3 { font-family: 'Inter', serif; }
-.info-box { background:#fffbf0;border-left:3px solid #c8a96e;padding:.8rem 1rem;border-radius:0 8px 8px 0;margin:1rem 0;font-size:.88rem; }
-.bubble-user { background:#2d3142;color:white;border-radius:18px 18px 4px 18px;padding:.8rem 1.1rem;margin:.5rem 0 .5rem auto;max-width:75%;width:fit-content;float:right;clear:both; }
-.bubble-ai { background:white;border:1px solid #e8e4dc;border-radius:18px 18px 18px 4px;padding:.8rem 1.1rem;margin:.5rem auto .5rem 0;max-width:85%;width:fit-content;float:left;clear:both;line-height:1.65; }
-.clearfix { clear:both; }
-.param-box-red { background:#fff0f0;border:1px solid #ffcccc;border-radius:8px;padding:14px 16px;font-size:13px;color:#444;line-height:1.5; }
-.param-box-green { background:#f0fff4;border:1px solid #b2dfdb;border-radius:8px;padding:14px 16px;font-size:13px;color:#444;line-height:1.5; }
-.param-warning { background:#c0392b;color:white;border-radius:8px;padding:14px 16px;font-size:13px;line-height:1.6;margin-top:8px; }
-.param-ok { background:#f0fff4;border:1px solid #b2dfdb;border-radius:8px;padding:14px 16px;font-size:13px;color:#2e7d52;margin-top:8px; }
-.cluster-counter { background:white;border:1px solid #e0dcd4;border-radius:8px;padding:8px 14px;font-size:13px;color:#444;margin-bottom:8px; }
-</style>
-""", unsafe_allow_html=True)
 
-SKILLS_INDEX_PATH = Path(__file__).parent / "configuration" / "skills-index.json"
-SKILLS_DIR = Path(__file__).parent / "skills"
+# ── CEA zip extraction ───────────────────────────────────────────────────────
 
-@st.cache_data
-def load_skills_index():
-    with open(SKILLS_INDEX_PATH) as f:
-        return json.load(f)["skills"]
+def extract_cea_zip(uploaded_file) -> dict:
+    """
+    Extract a CEA project zip.
+    Returns a dict with:
+      - files: {filename → DataFrame}
+      - raw_paths: all paths found
+      - errors: any read errors
+      - project_name: top-level folder name
+    """
+    result = {"files": {}, "raw_paths": [], "errors": [], "project_name": None}
 
-def load_skill_md(skill_id):
-    for folder in SKILLS_DIR.iterdir():
-        if folder.name.strip() == skill_id:
-            md = folder / "SKILL.md"
-            if md.exists(): return md.read_text()
-    return ""
-
-def get_building_names(cea_data):
-    """Extract building names from irradiation buildings file."""
-    df = cea_data["files"].get("solar_irradiation_annually_buildings.csv")
-    if df is not None and "name" in df.columns:
-        return sorted(df["name"].tolist())
-    # fallback: try PV buildings file
-    df = cea_data["files"].get("PV_PV1_total_buildings.csv")
-    if df is not None and "name" in df.columns:
-        return sorted(df["name"].tolist())
-    return []
-
-def extract_cea_zip(uploaded_file):
-    result = {"files": {}, "available_simulations": [], "errors": []}
     with tempfile.TemporaryDirectory() as tmpdir:
         with zipfile.ZipFile(io.BytesIO(uploaded_file.read())) as zf:
             zf.extractall(tmpdir)
-        root = Path(tmpdir)
-        top = [d for d in root.iterdir() if d.is_dir()]
-        if not top: return result
-        scenario = top[0]
 
-        export_dir = scenario / "export" / "results"
-        if export_dir.exists():
-            summaries = sorted([d for d in export_dir.iterdir() if d.is_dir()], reverse=True)
-            if summaries:
-                latest = summaries[0]
-                for fname in ["solar_irradiation_annually.csv","solar_irradiation_annually_buildings.csv",
-                              "solar_irradiation_seasonally.csv","solar_irradiation_seasonally_buildings.csv",
-                              "solar_irradiation_daily.csv","solar_irradiation_hourly.csv"]:
-                    fpath = latest / "solar_irradiation" / fname
-                    if fpath.exists():
-                        try: result["files"][fname] = pd.read_csv(fpath)
-                        except: pass
-                for fname in ["demand_annually.csv","demand_annually_buildings.csv","demand_seasonally.csv"]:
-                    fpath = latest / "demand" / fname
-                    if fpath.exists():
-                        try: result["files"][fname] = pd.read_csv(fpath)
-                        except: pass
+        for root, dirs, files in os.walk(tmpdir):
+            for fname in files:
+                full = os.path.join(root, fname)
+                rel  = os.path.relpath(full, tmpdir)
+                result["raw_paths"].append(rel)
+                if fname.endswith(".csv"):
+                    try:
+                        result["files"][fname] = pd.read_csv(full)
+                    except Exception as e:
+                        result["errors"].append(f"{fname}: {e}")
 
-        pv_dir = scenario / "outputs" / "data" / "potentials" / "solar"
-        if pv_dir.exists():
-            for fpath in sorted(pv_dir.glob("PV_*_total*.csv")):
-                try: result["files"][fpath.name] = pd.read_csv(fpath)
-                except: pass
-            for fpath in sorted(pv_dir.glob("PVT_*_total*.csv")):
-                try: result["files"][fpath.name] = pd.read_csv(fpath)
-                except: pass
+        top = [d for d in os.listdir(tmpdir) if os.path.isdir(os.path.join(tmpdir, d))]
+        if top:
+            result["project_name"] = top[0]
 
-        for fname in ["Total_demand.csv"]:
-            fpath = scenario / "outputs" / "data" / "demand" / fname
-            if fpath.exists():
-                try: result["files"][fname] = pd.read_csv(fpath)
-                except: pass
-
-        fpath = scenario / "inputs" / "database" / "COMPONENTS" / "CONVERSION" / "PHOTOVOLTAIC_PANELS.csv"
-        if fpath.exists():
-            try: result["files"]["PHOTOVOLTAIC_PANELS.csv"] = pd.read_csv(fpath)
-            except: pass
-
-        grid = scenario / "inputs" / "database" / "COMPONENTS" / "FEEDSTOCKS" / "FEEDSTOCKS_LIBRARY" / "GRID.csv"
-        if grid.exists():
-            try: result["files"]["GRID.csv"] = pd.read_csv(grid)
-            except: pass
-
-        epw = scenario / "inputs" / "weather" / "weather.epw"
-        if epw.exists():
-            try:
-                with open(epw, "r", errors="ignore") as f:
-                    result["files"]["weather_header"] = f.readline().strip()
-            except: pass
-
-        sims = []
-        if "solar_irradiation_annually.csv" in result["files"]: sims.append("Solar Irradiation")
-        if any(k.startswith("PV_") for k in result["files"]): sims.append("PV Yield")
-        if any(k.startswith("PVT_") for k in result["files"]): sims.append("PVT Yield")
-        if "demand_annually.csv" in result["files"]: sims.append("Demand")
-        result["available_simulations"] = sims
     return result
 
-def build_data_summary(cea_data, selected_buildings=None, scale="District"):
-    lines = []
-    if "weather_header" in cea_data["files"]:
-        lines.append(f"## Location\n{cea_data['files']['weather_header']}\n")
-    lines.append(f"## Available simulations\n{', '.join(cea_data['available_simulations'])}\n")
-    lines.append(f"## Analysis scale\n{scale}\n")
-    if selected_buildings:
-        lines.append(f"## Selected buildings\n{', '.join(selected_buildings)}\n")
 
-    for fname in ["solar_irradiation_annually.csv","solar_irradiation_annually_buildings.csv",
-                  "solar_irradiation_seasonally.csv","demand_annually.csv",
-                  "PV_PV1_total.csv","PV_PV2_total.csv","PV_PV3_total.csv","PV_PV4_total.csv",
-                  "PHOTOVOLTAIC_PANELS.csv","GRID.csv","Total_demand.csv"]:
-        df = cea_data["files"].get(fname)
-        if df is not None:
-            # Filter to selected buildings if applicable
-            if selected_buildings and "name" in df.columns:
-                df = df[df["name"].isin(selected_buildings)]
-            lines.append(f"### {fname}\n{df.shape[0]}x{df.shape[1]}\n{', '.join(df.columns)}\n{df.head(10).to_csv(index=False)}")
-    return "\n".join(lines)
+def extract_grid_emissions(cea_data: dict) -> float | None:
+    """
+    Read grid carbon intensity from GRID.csv.
+    CEA stores it as kgCO2/MJ — convert to kgCO2/kWh (* 3.6).
+    Returns kgCO2/kWh or None if not found.
+    """
+    df = cea_data["files"].get("GRID.csv")
+    if df is None:
+        return None
+    # Column name varies slightly across CEA versions
+    for col in ["GHG_kgCO2MJ", "CO2", "ghg_kgCO2MJ", "co2"]:
+        if col in df.columns:
+            val = df[col].iloc[0]
+            return round(float(val) * MJ_TO_KWH, 4)
+    # Fallback: look for any column containing "CO2" or "ghg"
+    co2_cols = [c for c in df.columns if "co2" in c.lower() or "ghg" in c.lower()]
+    if co2_cols:
+        val = df[co2_cols[0]].iloc[0]
+        return round(float(val) * MJ_TO_KWH, 4)
+    return None
 
-def call_llm(system_prompt, messages):
-    api_key = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
+
+def detect_pv_panel_types(cea_data: dict) -> list[str]:
+    """
+    Detect which PV panel types were simulated.
+    Looks for files like PV_PV1_total.csv, PV_PV2_total_buildings.csv etc.
+    Returns list of panel codes e.g. ['PV1', 'PV3']
+    """
+    panels = set()
+    for fname in cea_data["files"]:
+        for pv in ["PV1", "PV2", "PV3", "PV4"]:
+            if pv in fname and fname.startswith("PV_"):
+                panels.add(pv)
+    return sorted(list(panels))
+
+
+def calculate_self_consumption(cea_data: dict, panel_type: str) -> float | None:
+    """
+    Calculate self-consumption ratio from PV generation and demand files.
+    self_consumption = sum(min(pv_gen_h, demand_h)) / sum(pv_gen_h)
+
+    Uses hourly data if available, falls back to annual totals ratio.
+    Returns fraction (0–1) or None if data unavailable.
+    """
+    # Try hourly PV file
+    pv_fname = f"PV_{panel_type}_total.csv"
+    pv_df = cea_data["files"].get(pv_fname)
+
+    if pv_df is None:
+        return None
+
+    # Find generation column
+    gen_col = next((c for c in pv_df.columns if "E_PV_gen" in c or "E_PV" in c), None)
+    if gen_col is None:
+        return None
+
+    total_gen = pv_df[gen_col].sum()
+    if total_gen == 0:
+        return None
+
+    # Try to match with demand file(s)
+    # Aggregate all B{id}.csv demand files
+    demand_dfs = [df for fname, df in cea_data["files"].items()
+                  if fname.startswith("B") and fname.endswith(".csv") and len(fname) <= 10]
+
+    if demand_dfs:
+        # Sum all building demands hour by hour
+        demand_series = sum(df["E_sys_kWh"].values for df in demand_dfs
+                            if "E_sys_kWh" in df.columns)
+        if hasattr(demand_series, "__len__") and len(demand_series) == len(pv_df):
+            gen = pv_df[gen_col].values
+            self_consumed = np.minimum(gen, demand_series).sum()
+            return round(float(self_consumed / total_gen), 3)
+
+    # Fallback: use annual buildings file if available
+    bldg_fname = f"PV_{panel_type}_total_buildings.csv"
+    bldg_df = cea_data["files"].get(bldg_fname)
+    if bldg_df is not None:
+        sc_col = next((c for c in bldg_df.columns if "self_consumption" in c.lower() or "SC" in c), None)
+        if sc_col:
+            return round(float(bldg_df[sc_col].mean()), 3)
+
+    # Final fallback: assume 0.5 and flag it
+    return None
+
+
+# ── ACACIA curve lookup ──────────────────────────────────────────────────────
+
+@st.cache_data(ttl=3600)
+def fetch_acacia_curves() -> dict | None:
+    """Fetch ACACIA static curve data. Cached for 1 hour."""
     try:
-        resp = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={"model": "llama-3.3-70b-versatile", "max_tokens": 1500,
-                  "messages": [{"role": "system", "content": system_prompt}] + messages},
-            timeout=60
-        )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
-    except Exception as e:
-        return f"⚠️ API error: {e}"
+        r = requests.get(ACACIA_CURVE_URL, timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except Exception:
+        return None
 
-def build_system_prompt(skill_md, cea_summary, output_mode, scale, selected_buildings=None):
-    building_context = ""
-    if selected_buildings:
-        building_context = f"\nFocus your analysis specifically on: {', '.join(selected_buildings)}."
-    return f"""You are a BIPV expert helping architects interpret CEA4 simulation results.
-Output mode: {output_mode} | Scale: {scale}{building_context}
 
-## Skill specification
-{skill_md}
+def nearest_key(obj: dict, value: float) -> str:
+    keys = sorted([float(k) for k in obj.keys()])
+    nearest = min(keys, key=lambda k: abs(k - value))
+    return f"{nearest:.2f}"
 
-## CEA data
-{cea_summary}
 
-Follow the skill spec for the chosen output mode and scale. Use actual numbers from the data. Plain language for a design presentation. If a file is missing, say which CEA simulation needs to be run."""
+def get_carbon_threshold(
+    acacia_data: dict,
+    panel_type: str,          # CEA panel code e.g. 'PV3'
+    grid_emissions: float,    # kgCO2/kWh
+    self_consumption: float,  # fraction
+) -> dict:
+    """
+    Look up the carbon break-even irradiance threshold from ACACIA curves.
+    Returns dict with threshold_exact, threshold_cea, and metadata.
+    """
+    panel_info = PANEL_DB.get(panel_type, PANEL_DB["PV3"])
+    acacia_key = panel_info["acacia_key"]
 
-def render_parameter_check(threshold_result, skill_id):
-    """Render parameter check contextually for the selected skill."""
-    if not threshold_result or threshold_result.get("error"):
+    # Match to available ACACIA panel key
+    panel_key = next(
+        (k for k in acacia_data if k.lower().replace(" ", "") == acacia_key.replace(" ", "")),
+        list(acacia_data.keys())[0]
+    )
+
+    grid_key = nearest_key(acacia_data[panel_key], grid_emissions)
+    sc_key   = nearest_key(acacia_data[panel_key][grid_key], self_consumption)
+    series   = acacia_data[panel_key][grid_key][sc_key]
+
+    irr = np.array(series["Irradiance"])
+    imp = np.array(series["Impact"])
+
+    # Find zero crossing (carbon break-even)
+    threshold = None
+    for i in range(1, len(imp)):
+        if imp[i - 1] > 0 and imp[i] <= 0:
+            x0, x1 = irr[i - 1], irr[i]
+            y0, y1 = imp[i - 1], imp[i]
+            threshold = x0 + (0 - y0) * (x1 - x0) / (y1 - y0)
+            break
+
+    threshold_exact = round(threshold) if threshold else None
+    threshold_cea   = round(threshold / 50) * 50 if threshold else None
+
+    # McCarty Yspec reference: 500–525 kWh/m²/year regardless of location
+    yspec_target = 500
+
+    # Contextualise: which McCarty location is closest in grid emissions?
+    closest_location = min(
+        MCCARTY_THRESHOLDS.items(),
+        key=lambda kv: abs(kv[1]["grid_kgco2_kwh"] - grid_emissions)
+    )
+    loc_name, loc_data = closest_location
+    tech_key = "cdte" if "cdte" in acacia_key else ("opv" if "organic" in acacia_key else "csi")
+    mccarty_cpp = loc_data.get(tech_key, {}).get("cpp_10yr")
+    mccarty_ci  = loc_data.get(tech_key, {}).get("carbon_intensity")
+
+    return {
+        "panel_type": panel_type,
+        "panel_label": panel_info["label"],
+        "acacia_key_used": panel_key,
+        "grid_key_used": float(grid_key),
+        "sc_key_used": float(sc_key),
+        "threshold_exact": threshold_exact,
+        "threshold_cea": threshold_cea,
+        "yspec_target": yspec_target,
+        "irradiance": irr.tolist(),
+        "impact": imp.tolist(),
+        "mccarty_closest_location": loc_name,
+        "mccarty_cpp_10yr": mccarty_cpp,
+        "mccarty_carbon_intensity": mccarty_ci,
+        "embodied_kgco2_m2": panel_info["embodied_kgco2_m2"],
+    }
+
+
+# ── Skill loading ────────────────────────────────────────────────────────────
+
+@st.cache_data
+def load_skills_index() -> dict:
+    if os.path.exists(SKILLS_INDEX):
+        with open(SKILLS_INDEX) as f:
+            return json.load(f)
+    return {}
+
+
+def load_skill_prompt(skill_id: str) -> str:
+    """Load SKILL.md content for a given skill id."""
+    for folder in os.listdir(SKILLS_DIR):
+        if folder.strip() == skill_id:
+            md_path = os.path.join(SKILLS_DIR, folder, "SKILL.md")
+            if os.path.exists(md_path):
+                with open(md_path) as f:
+                    return f.read()
+    return ""
+
+
+# ── Claude API ───────────────────────────────────────────────────────────────
+
+def call_claude(system_prompt: str, user_message: str) -> str:
+    """Call Claude API and stream response."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY") or st.secrets.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return "⚠️ No Anthropic API key found. Add ANTHROPIC_API_KEY to your Hugging Face Space secrets."
+
+    client = anthropic.Anthropic(api_key=api_key)
+    with client.messages.stream(
+        model="claude-sonnet-4-20250514",
+        max_tokens=1500,
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_message}],
+    ) as stream:
+        return stream.get_final_text()
+
+
+def build_threshold_context(threshold_result: dict, grid_emissions: float, self_consumption: float) -> str:
+    """Build the threshold context block to inject into skill prompts."""
+    return f"""
+## BIPV Threshold Analysis (from ACACIA + McCarty et al. 2025)
+
+Panel type: {threshold_result['panel_label']} ({threshold_result['panel_type']})
+Grid carbon intensity (from GRID.csv): {grid_emissions:.3f} kgCO₂/kWh
+Self-consumption ratio (from PV CSVs): {self_consumption:.2f}
+
+Carbon break-even threshold (ACACIA): {threshold_result['threshold_exact']} kWh/m²/year
+Recommended CEA input value (rounded to nearest 50): {threshold_result['threshold_cea']} kWh/m²/year
+
+McCarty et al. 2025 reference thresholds (closest location: {threshold_result['mccarty_closest_location']}):
+- Specific yield (Yspec) target: {threshold_result['yspec_target']} kWh/m²/year (consistent across all locations)
+- Carbon intensity threshold: {threshold_result['mccarty_carbon_intensity']} kWh/m²/year
+- Carbon payback period (10yr target): {threshold_result['mccarty_cpp_10yr']} kWh/m²/year
+
+Note (McCarty 2025): Annual mean grid emissions may underestimate CPP threshold by up to 28%
+in high-variability grid contexts. The ACACIA curve-derived threshold above uses the annual mean.
+
+Panel embodied carbon: {threshold_result['embodied_kgco2_m2']} kgCO₂/m²
+
+Source: ACACIA parametric BIPV LCA (ETH Zürich) · McCarty et al. 2025 · Happle et al. 2019
+"""
+
+
+# ── Streamlit UI ─────────────────────────────────────────────────────────────
+
+def main():
+    st.set_page_config(
+        page_title="BIPV Analyst",
+        page_icon="☀️",
+        layout="wide",
+    )
+
+    st.title("BIPV Analyst")
+    st.caption("Upload a CEA project zip to analyse building-integrated photovoltaic performance.")
+
+    # ── Session state ──
+    if "cea_data"   not in st.session_state: st.session_state.cea_data   = None
+    if "grid_em"    not in st.session_state: st.session_state.grid_em    = None
+    if "panel_types"not in st.session_state: st.session_state.panel_types= []
+    if "sc_ratios"  not in st.session_state: st.session_state.sc_ratios  = {}
+    if "thresholds" not in st.session_state: st.session_state.thresholds = {}
+    if "messages"   not in st.session_state: st.session_state.messages   = []
+
+    # ── Sidebar: upload + status ──
+    with st.sidebar:
+        st.header("Project")
+        uploaded = st.file_uploader("Upload CEA project zip", type="zip")
+
+        if uploaded:
+            with st.spinner("Extracting zip..."):
+                cea_data = extract_cea_zip(uploaded)
+                st.session_state.cea_data = cea_data
+
+            # Extract grid emissions
+            grid_em = extract_grid_emissions(cea_data)
+            st.session_state.grid_em = grid_em
+
+            # Detect panel types
+            panels = detect_pv_panel_types(cea_data)
+            st.session_state.panel_types = panels
+
+            # Calculate self-consumption per panel type
+            for p in panels:
+                sc = calculate_self_consumption(cea_data, p)
+                st.session_state.sc_ratios[p] = sc if sc is not None else 0.50
+
+            st.success(f"Loaded: {cea_data.get('project_name', 'CEA project')}")
+
+            if grid_em:
+                st.metric("Grid emissions", f"{grid_em:.3f} kgCO₂/kWh", help="From GRID.csv · kgCO₂/kWh")
+            else:
+                st.warning("GRID.csv not found — grid emissions unavailable")
+
+            if panels:
+                st.write("**Simulated panel types:**", ", ".join(panels))
+                for p in panels:
+                    sc = st.session_state.sc_ratios.get(p)
+                    if sc:
+                        st.write(f"  {p} self-consumption: {sc:.2f}")
+                    else:
+                        st.write(f"  {p} self-consumption: estimated 0.50")
+            else:
+                st.warning("No PV simulation results found in zip")
+
+        # ── Threshold summary in sidebar ──
+        if st.session_state.thresholds:
+            st.divider()
+            st.subheader("Thresholds")
+            for p, t in st.session_state.thresholds.items():
+                st.metric(
+                    label=f"{p} ({t['panel_label']})",
+                    value=f"{t['threshold_cea']} kWh/m²/yr",
+                    help=f"Exact: {t['threshold_exact']} · CEA input (rounded to 50): {t['threshold_cea']}"
+                )
+
+    # ── Main area ──
+    if st.session_state.cea_data is None:
+        st.info("Upload a CEA project zip to get started.")
         return
 
-    simulations = SKILL_SIMULATION_MAP.get(skill_id, None)
-
-    # No parameter check applicable
-    if simulations is not None and len(simulations) == 0:
-        st.markdown(
-            '<div style="background:#f5f5f5;border:1px solid #e0e0e0;border-radius:8px;'
-            'padding:10px 14px;font-size:12.5px;color:#888;margin-bottom:12px;">'
-            'No parameter check needed for this analysis.</div>',
-            unsafe_allow_html=True
-        )
+    # ── Panel type selector + threshold computation ──
+    panels = st.session_state.panel_types
+    if not panels:
+        st.warning("No PV simulation results detected in the uploaded zip.")
         return
 
-    city = threshold_result["location"]["city"]
-    country = threshold_result["country"]
-    em_grid = threshold_result["em_grid"]
-    thresholds = threshold_result.get("thresholds_by_panel", {})
-
-    # Only show parameter check for skills that use PV simulations
-    if simulations is not None and "pv" not in simulations:
-        st.markdown(
-            '<div style="background:#f0fff4;border:1px solid #b2dfdb;border-radius:8px;'
-            'padding:10px 14px;font-size:12.5px;color:#2e7d52;margin-bottom:12px;">'
-            '✓ All parameter inputs look correct for this analysis.</div>',
-            unsafe_allow_html=True
-        )
-        return
-
-    # Detect which PV types were actually run (presence of PV_PVx_total.csv)
-    cea_data = st.session_state.get("cea_data", {})
-    available_files = cea_data.get("files", {}) if cea_data else {}
-    run_pv_types = [
-        ptype for ptype in ["PV1", "PV2", "PV3", "PV4"]
-        if f"PV_{ptype}_total.csv" in available_files
-    ]
-    if not run_pv_types:
-        run_pv_types = list(thresholds.keys()) if thresholds else ["PV1"]
-
-    from threshold_module import PV_PANEL_TYPES
-
-    thresholds_uncapped = threshold_result.get("thresholds_uncapped", {})
-    type_thresholds = {p: thresholds.get(p, 1200) for p in run_pv_types}
-    type_thresholds_uncapped = {p: thresholds_uncapped.get(p, 1200) for p in run_pv_types}
-
-    # Use the highest threshold (most conservative — only carbon-viable surfaces included)
-    max_ptype = max(type_thresholds, key=lambda p: type_thresholds[p])
-    recommended = type_thresholds[max_ptype]
-    driving_panel = PV_PANEL_TYPES.get(max_ptype, {})
-
-    # Simulation label
-    if len(run_pv_types) == 1:
-        sim_label = f"Renewable Energy Potential Assessment<br>→ Photovoltaic ({run_pv_types[0]}: {PV_PANEL_TYPES.get(run_pv_types[0], {}).get('description', '')})"
-    else:
-        types_str = ", ".join([f"{p} ({PV_PANEL_TYPES.get(p,{}).get('description','')})" for p in run_pv_types])
-        sim_label = f"Renewable Energy Potential Assessment<br>→ Photovoltaic ({types_str})"
-
-    # Info text — show raw calculated value(s) and capped recommendation
-    if len(run_pv_types) == 1:
-        raw = int(type_thresholds_uncapped.get(run_pv_types[0], recommended))
-        cap = int(recommended)
-        panel_name = PV_PANEL_TYPES.get(run_pv_types[0], {}).get("description", "")
-        if raw == cap:
-            info_text = (
-                f'For <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), '
-                f'the calculated threshold for {run_pv_types[0]} ({panel_name}) '
-                f'is <b>{raw} kWh/m&#x00B2;/year</b>.'
-            )
-        else:
-            info_text = (
-                f'For <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), '
-                f'the formula gives {raw} kWh/m&#x00B2;/year for {run_pv_types[0]} ({panel_name}), '
-                f'capped to a practical maximum of <b>{cap} kWh/m&#x00B2;/year</b>.'
-            )
-    else:
-        per_panel_str = " &bull; ".join([
-            f'{p}: {int(type_thresholds_uncapped.get(p, type_thresholds[p]))} kWh/m&#x00B2;/yr'
-            for p in run_pv_types
-        ])
-        info_text = (
-            f'For <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), '
-            f'the calculated thresholds are: {per_panel_str}. '
-            f'Since CEA uses one threshold for all panel types, set it to '
-            f'the most conservative value (carbon-viable surfaces only): <b>{int(recommended)} kWh/m&#x00B2;/year</b> '
-            f'({max_ptype} — {driving_panel.get("description", "")}, highest embodied carbon).'
+    selected_panel = panels[0]
+    if len(panels) > 1:
+        selected_panel = st.selectbox(
+            "Panel type (simulated in your project)",
+            options=panels,
+            format_func=lambda p: f"{p} — {PANEL_DB.get(p, {}).get('label', p)}"
         )
 
-    st.markdown("**Parameter check**")
+    # Compute threshold for selected panel if not already done
+    acacia_data = fetch_acacia_curves()
+    grid_em = st.session_state.grid_em
+    sc = st.session_state.sc_ratios.get(selected_panel, 0.50)
 
-    h1, h2, h3, h4 = st.columns([2.5, 2, 2, 4])
-    for col, label in zip([h1, h2, h3, h4], ["Simulation", "Parameter", "Recommended value", "Info"]):
-        with col:
-            st.markdown(
-                f'<p style="font-size:11px;font-weight:600;color:#888;letter-spacing:0.08em;'
-                f'text-transform:uppercase;margin:0;">{label}</p>',
-                unsafe_allow_html=True
+    if acacia_data and grid_em and selected_panel not in st.session_state.thresholds:
+        t = get_carbon_threshold(acacia_data, selected_panel, grid_em, sc)
+        st.session_state.thresholds[selected_panel] = t
+
+    threshold_result = st.session_state.thresholds.get(selected_panel)
+
+    # ── Threshold display ──
+    if threshold_result:
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Carbon break-even", f"{threshold_result['threshold_exact']} kWh/m²/yr",
+                    help="Irradiance where PV carbon intensity equals grid carbon intensity (ACACIA + Happle 2019)")
+        col2.metric("CEA input value", f"{threshold_result['threshold_cea']} kWh/m²/yr",
+                    help="Rounded to nearest 50 for use in CEA radiation threshold field")
+        col3.metric("McCarty Yspec target", "500–525 kWh/m²/yr",
+                    help="Consistent across all locations and technologies (McCarty et al. 2025)")
+        col4.metric("Closest reference", threshold_result["mccarty_closest_location"].title(),
+                    help=f"Grid emissions match: {threshold_result['grid_key_used']:.2f} kgCO₂/kWh")
+
+        # McCarty CPP context
+        if threshold_result["mccarty_cpp_10yr"]:
+            st.caption(
+                f"McCarty 2025 CPP threshold for 10-year carbon payback "
+                f"({threshold_result['mccarty_closest_location'].title()}, {threshold_result['panel_label']}): "
+                f"**{threshold_result['mccarty_cpp_10yr']} kWh/m²/yr** · "
+                f"Annual mean grid data may underestimate CPP threshold by up to 28% in variable-grid contexts."
             )
-    st.markdown('<hr style="margin:4px 0 8px 0;border:none;border-top:1.5px solid #e0e0e0;">', unsafe_allow_html=True)
 
-    c1, c2, c3, c4 = st.columns([2.5, 2, 2, 4])
-    with c1:
-        st.markdown(sim_label, unsafe_allow_html=True)
-    with c2:
-        st.markdown("`annual-radiation-threshold`")
-    with c3:
-        # Status-driven styling: unverifiable=blue, wrong=red, correct=green
-        status = "unverifiable"  # threshold cannot be read from the zip
-        tooltip = "Cannot verify — check this value in CEA"
-        if status == "wrong":
-            bg, border = "#fff0f0", "#ffcccc"
-        elif status == "correct":
-            bg, border = "#f0fff4", "#b2dfdb"
-        else:  # unverifiable
-            bg, border = "#e3f2fd", "#90caf9"
-        st.markdown(
-            f'<div style="background:{bg};border:1px solid {border};border-radius:6px;'
-            f'padding:6px 10px;font-size:13px;cursor:default;" '
-            f'title="{tooltip}">'
-            f'<b>{int(recommended)} kWh/m&#x00B2;/year</b></div>',
-            unsafe_allow_html=True
-        )
-    with c4:
-        st.markdown(info_text, unsafe_allow_html=True)
-        if st.button(
-            "Reasoning →" if not st.session_state.get("reasoning_threshold") else "Reasoning ↑",
-            key="btn_threshold"
-        ):
-            st.session_state["reasoning_threshold"] = not st.session_state.get("reasoning_threshold", False)
+    st.divider()
+
+    # ── Decision tree ──
+    st.subheader("What do you want to understand?")
+    skills_index = load_skills_index()
+
+    goal = st.selectbox("Goal", [
+        "Site potential",
+        "Impact & viability",
+        "Optimise my design",
+    ])
+
+    # Sub-branch options per goal (abbreviated — full tree in skills-index.json)
+    sub_options = {
+        "Site potential": [
+            "Solar availability — surface irradiation",
+            "Solar availability — seasonal variation",
+            "Contextual feasibility — shading analysis",
+        ],
+        "Impact & viability": [
+            "Carbon impact — carbon payback",
+            "Carbon impact — operational carbon footprint",
+            "Economic viability — cost analysis",
+            "Economic viability — investment payback",
+        ],
+        "Optimise my design": [
+            "Panel type trade-off",
+            "BIPV scenario comparison",
+            "Demand vs supply match",
+        ],
+    }
+
+    sub = st.selectbox("Focus", sub_options.get(goal, []))
+
+    output_mode = st.radio(
+        "Output style",
+        ["Key takeaway", "Explain the numbers", "Design implication"],
+        horizontal=True,
+    )
+
+    # ── Run analysis ──
+    if st.button("Run analysis", type="primary"):
+        # Find matching skill id from index
+        skill_id = None
+        for sid, meta in skills_index.items():
+            label = meta.get("label", "").lower()
+            if any(word in label for word in sub.lower().split("—")[-1].strip().split()):
+                skill_id = sid
+                break
+
+        skill_prompt = load_skill_prompt(skill_id) if skill_id else ""
+
+        # Build data summary
+        data_lines = []
+        for fname, df in st.session_state.cea_data["files"].items():
+            if df is not None and any(kw in fname for kw in ["PV_", "solar", "emission", "demand"]):
+                data_lines.append(f"### {fname}\nColumns: {', '.join(df.columns)}\n{df.head(3).to_csv(index=False)}")
+        data_summary = "\n\n".join(data_lines[:6])  # cap at 6 files to stay within context
+
+        # Build threshold context
+        threshold_ctx = ""
+        if threshold_result:
+            threshold_ctx = build_threshold_context(threshold_result, grid_em, sc)
+
+        system = f"""You are a BIPV analysis assistant embedded in a tool used by architects.
+Your job is to interpret CEA simulation results and give clear, design-ready insights.
+
+{skill_prompt}
+
+{threshold_ctx}
+
+Output mode requested: {output_mode}
+- Key takeaway: 2–3 sentences max, one headline number, one design implication
+- Explain the numbers: walk through each metric clearly, explain what it means for design
+- Design implication: concrete recommendation the architect can act on immediately
+
+Always cite sources (ACACIA, McCarty et al. 2025, Happle et al. 2019, CEA data) where relevant.
+Never invent numbers. If data is missing, say so clearly.
+"""
+
+        user_msg = f"""
+Analyse the BIPV results for this CEA project.
+Goal: {goal}
+Focus: {sub}
+Output mode: {output_mode}
+
+## CEA data available:
+{data_summary}
+"""
+
+        with st.spinner("Analysing..."):
+            response = call_claude(system, user_msg)
+
+        st.session_state.messages.append({"role": "assistant", "content": response, "label": sub})
+        st.rerun()
+
+    # ── Conversation history ──
+    for msg in reversed(st.session_state.messages):
+        with st.chat_message(msg["role"]):
+            st.markdown(f"**{msg.get('label', '')}**\n\n{msg['content']}")
+
+    # ── Follow-up ──
+    if st.session_state.messages:
+        followup = st.chat_input("Ask a follow-up question...")
+        if followup:
+            threshold_ctx = build_threshold_context(threshold_result, grid_em, sc) if threshold_result else ""
+            system = f"""You are a BIPV analysis assistant. Continue the conversation about the architect's CEA project results.
+{threshold_ctx}
+Previous analysis context is in the conversation history. Be concise and design-focused."""
+            history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[-4:]]
+            history.append({"role": "user", "content": followup})
+
+            api_key = os.environ.get("ANTHROPIC_API_KEY") or st.secrets.get("ANTHROPIC_API_KEY", "")
+            client = anthropic.Anthropic(api_key=api_key)
+            response = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=800,
+                system=system,
+                messages=history,
+            ).content[0].text
+
+            st.session_state.messages.append({"role": "user", "content": followup, "label": "Follow-up"})
+            st.session_state.messages.append({"role": "assistant", "content": response, "label": "Response"})
             st.rerun()
 
-        if st.session_state.get("reasoning_threshold"):
-            if len(run_pv_types) > 1:
-                panel_table = "".join([
-                    f'<tr><td style="padding:2px 8px;">{p}</td>'
-                    f'<td style="padding:2px 8px;">{PV_PANEL_TYPES.get(p,{}).get("description","")}</td>'
-                    f'<td style="padding:2px 8px;">{PV_PANEL_TYPES.get(p,{}).get("em_bipv","")} kgCO&#x2082;/m&#x00B2;</td>'
-                    f'<td style="padding:2px 8px;"><b>{int(type_thresholds[p])} kWh/m&#x00B2;/yr</b></td></tr>'
-                    for p in run_pv_types
-                ])
-                panel_section = (
-                    f'<p style="font-size:12px;margin:8px 0 4px 0;"><strong>Thresholds by panel type:</strong></p>'
-                    f'<table style="font-size:11px;color:#555;border-collapse:collapse;">'
-                    f'<tr style="color:#999;"><td style="padding:2px 8px;">Type</td><td style="padding:2px 8px;">Technology</td>'
-                    f'<td style="padding:2px 8px;">Embodied carbon</td><td style="padding:2px 8px;">Threshold</td></tr>'
-                    f'{panel_table}</table>'
-                )
-            else:
-                panel_section = ""
 
-            st.markdown(
-                f'<div style="background:#f7f7f7;border:1px solid #e8e8e8;border-radius:8px;'
-                f'padding:12px 14px;margin-top:8px;font-size:12px;color:#555;line-height:1.7;">'
-                f'Every surface needs a minimum amount of sunlight to make BIPV worthwhile. '
-                f'Below this level, the panel never generates enough clean electricity to offset '
-                f'the carbon emitted when it was manufactured. '
-                f'For <strong>{country}</strong> (grid: {em_grid} kgCO&#x2082;/kWh) — '
-                f'the cleaner the grid, the harder panels are to justify on carbon grounds, '
-                f'so a cleaner grid means a higher threshold. '
-                f'Research on Zurich specifically found that a 10-year carbon payback '
-                f'is not achievable for any panel type given its very clean grid. '
-                f'Only CdTe panels get close (~18.5 years at best). '
-                f'CEA\'s default of 800 kWh/m&sup2;/year was set for carbon-intensive grids '
-                f'like Southeast Asia and is often too low for Europe.'
-                f'{panel_section}'
-                f'<br><span style="font-size:11px;color:#aaa;margin-top:6px;display:block;font-style:italic;">'
-                f'Happle et al. (2019). J. Phys.: Conf. Ser. 1343, 012077. &bull; '
-                f'Galimshina et al. (2024). Renew. Energy 236, 121404. &bull; '
-                f'McCarty et al. (2025a). RSER 211, 115326. &bull; '
-                f'McCarty et al. (2025b). J. Phys.: Conf. Ser. 3140, 032006.</span>'
-                f'</div>',
-                unsafe_allow_html=True
-            )
-
-    st.markdown('<hr style="margin:4px 0;border:none;border-top:1px solid #f0f0f0;">', unsafe_allow_html=True)
-
-
-def build_tree():
-    tree = {}
-    for s in skills:
-        path = s["position_in_tree"]
-        goal = path[0]
-        if goal not in tree: tree[goal] = {}
-        if len(path) == 2:
-            tree[goal][path[1]] = {"id": s["id"], "children": {}}
-        elif len(path) == 3:
-            mid = path[1]
-            if mid not in tree[goal]: tree[goal][mid] = {"id": None, "children": {}}
-            tree[goal][mid]["children"][path[2]] = {"id": s["id"], "children": {}}
-        elif len(path) == 4:
-            mid, sub = path[1], path[2]
-            if mid not in tree[goal]: tree[goal][mid] = {"id": None, "children": {}}
-            if sub not in tree[goal][mid]["children"]:
-                tree[goal][mid]["children"][sub] = {"id": None, "children": {}}
-            tree[goal][mid]["children"][sub]["children"][path[3]] = {"id": s["id"], "children": {}}
-    return tree
-
-skills = load_skills_index()
-TREE = build_tree()
-
-# ── Session state ──────────────────────────────────────────────────────────────
-for k, v in [("cea_data", None), ("chat_history", []),
-              ("tree_scale", None), ("tree_goal", None), ("tree_sub", None),
-              ("tree_subsub", None), ("tree_mode", None),
-              ("skill_id", None), ("skill_name", None),
-              ("analysis_ran", False), ("threshold_result", None),
-              ("param_check_hidden", False),
-              ("selected_building", None), ("selected_cluster", []),
-              ("reasoning_open", False), ("reasoning_threshold", False)]:
-    if k not in st.session_state:
-        st.session_state[k] = v
-
-# ── Upload screen ──────────────────────────────────────────────────────────────
-if st.session_state.cea_data is None:
-    st.markdown("# BIPV Analyst")
-    st.markdown("Upload your CEA4 project folder (zipped) to begin.")
-    st.markdown('<div class="info-box"><strong>How to export:</strong> Compress your CEA scenario folder (e.g. <code>baseline</code>) to a <code>.zip</code> and upload it here.</div>', unsafe_allow_html=True)
-    uploaded = st.file_uploader("Drop your CEA project zip here", type=["zip"], label_visibility="collapsed")
-    if uploaded:
-        with st.spinner("Reading project…"):
-            cea_data = extract_cea_zip(uploaded)
-        if not cea_data["files"]:
-            st.error("No simulation files found.")
-        else:
-            st.session_state.cea_data = cea_data
-            st.session_state.param_check_hidden = False
-            if "weather_header" in cea_data["files"]:
-                st.session_state.threshold_result = get_threshold_check(
-                    cea_data["files"]["weather_header"], cea_default=800
-                )
-            st.rerun()
-
-# ── Analysis screen ────────────────────────────────────────────────────────────
-else:
-
-
-    # ── Tree section (full width) ──────────────────────────────────────────────
-    with st.container():
-        st.markdown("### Build your analysis")
-        sims = st.session_state.cea_data["available_simulations"]
-        st.caption("Loaded: " + " · ".join(f"✓ {s}" for s in sims))
-        st.markdown("")
-
-        # Step 1: Scale
-        if st.session_state.tree_scale:
-            st.markdown(f"**Scale** · *{st.session_state.tree_scale}*")
-        else:
-            st.markdown("**Step 1 — Scale**")
-            for scale in ["Building", "Cluster", "District"]:
-                if st.button(scale, key=f"scale_{scale}"):
-                    st.session_state.tree_scale = scale
-                    st.session_state.tree_goal = None
-                    st.session_state.tree_sub = None
-                    st.session_state.tree_subsub = None
-                    st.session_state.tree_mode = None
-                    st.session_state.analysis_ran = False
-                    st.session_state.selected_building = None
-                    st.session_state.selected_cluster = []
-                    st.rerun()
-
-        # Building / Cluster selector
-        if st.session_state.tree_scale in ["Building", "Cluster"]:
-            building_names = get_building_names(st.session_state.cea_data)
-            if building_names:
-                st.markdown("")
-                if st.session_state.tree_scale == "Building":
-                    st.markdown("**Select building**")
-                    chosen = st.selectbox(
-                        "Building",
-                        building_names,
-                        index=building_names.index(st.session_state.selected_building)
-                        if st.session_state.selected_building in building_names else 0,
-                        label_visibility="collapsed",
-                        key="building_selector"
-                    )
-                    st.session_state.selected_building = chosen
-
-                elif st.session_state.tree_scale == "Cluster":
-                    n = len(st.session_state.selected_cluster)
-                    st.markdown(
-                        f'<div class="cluster-counter">{"No buildings selected yet" if n == 0 else f"{n} building{"s" if n > 1 else ""} selected"}</div>',
-                        unsafe_allow_html=True
-                    )
-                    st.markdown("**Select buildings for cluster**")
-                    chosen = st.multiselect(
-                        "Buildings",
-                        building_names,
-                        default=st.session_state.selected_cluster,
-                        label_visibility="collapsed",
-                        key="cluster_selector"
-                    )
-                    st.session_state.selected_cluster = chosen
-
-        # Step 2: Goal
-        if st.session_state.tree_scale:
-            st.markdown("")
-            if st.session_state.tree_goal:
-                st.markdown(f"**Goal** · *{st.session_state.tree_goal}*")
-            else:
-                st.markdown("**Step 2 — What do you want to understand?**")
-                for goal in TREE.keys():
-                    label = goal.replace("Impact and Viability", "Impact & Viability")
-                    if st.button(label, key=f"goal_{goal}"):
-                        st.session_state.tree_goal = goal
-                        st.session_state.tree_sub = None
-                        st.session_state.tree_subsub = None
-                        st.session_state.tree_mode = None
-                        st.session_state.analysis_ran = False
-                        st.rerun()
-
-        # Step 3: Topic
-        if st.session_state.tree_goal:
-            st.markdown("")
-            topics = TREE[st.session_state.tree_goal]
-            if st.session_state.tree_sub:
-                st.markdown(f"**Topic** · *{st.session_state.tree_sub}*")
-            else:
-                st.markdown("**Step 3 — Topic**")
-                for topic, node in topics.items():
-                    if st.button(topic, key=f"sub_{topic}"):
-                        st.session_state.tree_sub = topic
-                        st.session_state.tree_subsub = None
-                        st.session_state.tree_mode = None
-                        st.session_state.analysis_ran = False
-                        if not node["children"]:
-                            st.session_state.skill_id = node["id"]
-                            st.session_state.skill_name = topic
-                        st.rerun()
-
-        # Step 4: Analysis (if subtopics exist)
-        if st.session_state.tree_sub:
-            node = TREE[st.session_state.tree_goal][st.session_state.tree_sub]
-            if node["children"]:
-                st.markdown("")
-                if st.session_state.tree_subsub:
-                    st.markdown(f"**Analysis** · *{st.session_state.tree_subsub}*")
-                else:
-                    st.markdown("**Step 4 — Analysis**")
-                    for child, child_node in node["children"].items():
-                        if st.button(child, key=f"subsub_{child}"):
-                            st.session_state.tree_subsub = child
-                            st.session_state.tree_mode = None
-                            st.session_state.analysis_ran = False
-                            st.session_state.skill_id = child_node["id"]
-                            st.session_state.skill_name = child
-                            st.rerun()
-
-        # Step 5: Output mode
-        skill_ready = st.session_state.skill_id and (
-            not TREE.get(st.session_state.tree_goal, {}).get(
-                st.session_state.tree_sub or "", {}).get("children") or
-            st.session_state.tree_subsub
-        )
-        if skill_ready:
-            st.markdown("")
-            if st.session_state.tree_mode:
-                st.markdown(f"**Output mode** · *{st.session_state.tree_mode}*")
-            else:
-                st.markdown("**Step 5 — How do you want the answer?**")
-                for mode in ["Key takeaway", "Explain the numbers", "Design implication"]:
-                    if st.button(mode, key=f"mode_{mode}"):
-                        st.session_state.tree_mode = mode
-                        st.session_state.analysis_ran = False
-                        st.rerun()
-
-        # Run button
-        if st.session_state.tree_mode and st.session_state.skill_id and not st.session_state.analysis_ran:
-            # Validate building/cluster selection
-            scale = st.session_state.tree_scale
-            ready_to_run = True
-            if scale == "Building" and not st.session_state.selected_building:
-                st.warning("Please select a building above.")
-                ready_to_run = False
-            if scale == "Cluster" and len(st.session_state.selected_cluster) == 0:
-                st.warning("Please select at least one building for the cluster.")
-                ready_to_run = False
-
-            if ready_to_run:
-                st.markdown("")
-                if st.button("▶ Run analysis", type="primary"):
-                    st.session_state.chat_history = []
-                    st.session_state.analysis_ran = True
-                    st.rerun()
-
-        st.markdown("---")
-        col_a, col_b, col_c = st.columns(3)
-        with col_a:
-            if st.button("← Go back"):
-                # Step back one level
-                if st.session_state.tree_mode:
-                    st.session_state.tree_mode = None
-                    st.session_state.analysis_ran = False
-                elif st.session_state.tree_subsub:
-                    st.session_state.tree_subsub = None
-                    st.session_state.skill_id = None
-                    st.session_state.skill_name = None
-                elif st.session_state.tree_sub:
-                    st.session_state.tree_sub = None
-                    st.session_state.skill_id = None
-                    st.session_state.skill_name = None
-                elif st.session_state.tree_goal:
-                    st.session_state.tree_goal = None
-                elif st.session_state.tree_scale:
-                    st.session_state.tree_scale = None
-                    st.session_state.selected_building = None
-                    st.session_state.selected_cluster = []
-                st.session_state.chat_history = []
-                st.rerun()
-        with col_b:
-            if st.button("↺ Start over"):
-                for k in ["tree_scale","tree_goal","tree_sub","tree_subsub",
-                          "tree_mode","skill_id","skill_name","analysis_ran",
-                          "selected_building","selected_cluster"]:
-                    st.session_state[k] = None if k != "selected_cluster" else []
-                st.session_state.chat_history = []
-                st.rerun()
-        with col_c:
-            if st.button("↩ New project"):
-                for k in ["cea_data","tree_scale","tree_goal","tree_sub","tree_subsub",
-                          "tree_mode","skill_id","skill_name","analysis_ran",
-                          "threshold_result","param_check_hidden",
-                          "selected_building","selected_cluster"]:
-                    st.session_state[k] = None if k != "selected_cluster" else []
-                st.session_state.chat_history = []
-                st.rerun()
-
-    # ── Analysis section (full width, below tree) ──────────────────────────────
-    st.markdown("---")
-    with st.container():
-        st.markdown("### Analysis")
-
-        if st.session_state.analysis_ran and st.session_state.skill_id and not st.session_state.chat_history:
-            scale = st.session_state.tree_scale
-            selected_buildings = None
-            if scale == "Building" and st.session_state.selected_building:
-                selected_buildings = [st.session_state.selected_building]
-            elif scale == "Cluster" and st.session_state.selected_cluster:
-                selected_buildings = st.session_state.selected_cluster
-
-            skill_md = load_skill_md(st.session_state.skill_id)
-            cea_summary = build_data_summary(
-                st.session_state.cea_data,
-                selected_buildings=selected_buildings,
-                scale=scale
-            )
-            system_prompt = build_system_prompt(
-                skill_md, cea_summary,
-                st.session_state.tree_mode,
-                scale,
-                selected_buildings=selected_buildings
-            )
-            user_msg = (f"Run the **{st.session_state.skill_name}** analysis at "
-                       f"**{scale}** scale in **{st.session_state.tree_mode}** mode."
-                       + (f" Focus on buildings: {', '.join(selected_buildings)}." if selected_buildings else "")
-                       + " Use only the data provided.")
-            st.session_state.chat_history.append({"role": "user", "content": user_msg})
-            with st.spinner("Analysing…"):
-                response = call_llm(system_prompt, st.session_state.chat_history)
-            st.session_state.chat_history.append({"role": "assistant", "content": response})
-            st.rerun()
-
-        if not st.session_state.chat_history:
-            st.markdown('<div class="info-box">← Complete the steps on the left to run an analysis.</div>',
-                       unsafe_allow_html=True)
-        elif st.session_state.skill_id and st.session_state.threshold_result:
-            render_parameter_check(st.session_state.threshold_result, st.session_state.skill_id)
-            st.markdown("**Analysis results**")
-
-        for i, msg in enumerate(st.session_state.chat_history):
-            if msg["role"] == "user" and i == 0:
-                pass  # hide initial trigger
-            elif msg["role"] == "user":
-                st.markdown(f'<div class="bubble-user">{msg["content"]}</div><div class="clearfix"></div>',
-                           unsafe_allow_html=True)
-            else:
-                st.markdown(f'<div class="bubble-ai">{msg["content"]}</div><div class="clearfix"></div>',
-                           unsafe_allow_html=True)
-
-        if st.session_state.chat_history:
-            st.markdown("---")
-            followup = st.text_input("Ask a follow-up…", key="fu",
-                                    placeholder="e.g. Which building has the best south facade?")
-            if st.button("Send") and followup.strip():
-                scale = st.session_state.tree_scale
-                selected_buildings = None
-                if scale == "Building" and st.session_state.selected_building:
-                    selected_buildings = [st.session_state.selected_building]
-                elif scale == "Cluster" and st.session_state.selected_cluster:
-                    selected_buildings = st.session_state.selected_cluster
-
-                skill_md = load_skill_md(st.session_state.skill_id or "")
-                cea_summary = build_data_summary(
-                    st.session_state.cea_data,
-                    selected_buildings=selected_buildings,
-                    scale=scale or ""
-                )
-                system_prompt = build_system_prompt(
-                    skill_md, cea_summary,
-                    st.session_state.tree_mode or "",
-                    scale or "",
-                    selected_buildings=selected_buildings
-                )
-                st.session_state.chat_history.append({"role": "user", "content": followup})
-                with st.spinner("Thinking…"):
-                    response = call_llm(system_prompt, st.session_state.chat_history)
-                st.session_state.chat_history.append({"role": "assistant", "content": response})
-                st.rerun()
-
-
+if __name__ == "__main__":
+    main()
