@@ -20,37 +20,11 @@ CEA does not produce a separate shading output file. Instead, shading from surro
 
 ---
 
-## CEA4 Integration
+## File Source
 
-This skill runs as a CEA4 plugin. All data is read automatically via the CEA4 `InputLocator`.
+This skill reads from the uploaded CEA project zip. The app finds the relevant files automatically by filename — no manual file selection needed.
 
-**Location context** read automatically from the project weather file:
-```python
-locator.get_weather()  # → .epw file containing city, latitude, longitude
-```
-
-**Surroundings geometry** accessed via InputLocator:
-```python
-locator.get_surroundings_geometry()
-# → surroundings.shp — neighbouring buildings with height and footprint
-# Used to: identify which neighbours are tall enough and close enough to cast significant shadows
-```
-
-**Zone geometry** accessed via InputLocator:
-```python
-locator.get_zone_geometry()
-# → zone.shp — the project buildings with height and footprint
-# Used to: understand relative height relationships between project and surroundings
-```
-
-**Irradiation data** accessed via InputLocator:
-```python
-locator.get_solar_radiation_csv(period="annually")
-# → solar_irradiation_annually_buildings.csv
-# Used to: identify which buildings are underperforming relative to their orientation
-```
-
----
+**Location context** is taken from the project's weather file (`.epw`) found inside the zip.
 
 ## Data Sources
 
@@ -197,3 +171,21 @@ When the architect is still defining massing (building heights, footprints, spac
 - IDP 2024 Team 2: solar fraction analysis revealing shading as key factor in low-performing facades
 - Interview — Interviewee A: iterative massing adjustments based on solar simulation results
 - Interview — Interviewee C: district-level analysis used to identify which buildings to prioritise for energy intervention
+
+---
+
+## PV Simulation Config — Design Implications
+
+The app injects the following inferred parameters from the CEA output into your context:
+
+```
+panel-on-roof: YES/NO
+panel-on-wall: YES/NO
+Panel types simulated: PV1, PV2, ...
+```
+
+**Use these to proactively flag design implications:**
+
+- If `panel-on-wall: NO` → *"Your simulation excluded wall surfaces. Facade BIPV is often the most architecturally integrated option — consider enabling walls and re-running."*
+- If `panel-on-roof: NO` → *"Roof surfaces were excluded. These typically receive the highest irradiation and lowest shading — worth including for a complete picture."*
+- If only 1 panel type was simulated → *"Only PV1 was simulated. Running all 4 types would show whether a lower-embodied-carbon panel (e.g. CdTe) could justify more surfaces."*
