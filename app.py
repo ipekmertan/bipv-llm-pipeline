@@ -415,9 +415,6 @@ def render_parameter_check(threshold_result, skill_id):
                 f'so a cleaner grid means a higher threshold. '
                 f'When the raw threshold exceeds 1200 kWh/m&#x00B2;/year it is capped there, '
                 f'because beyond that almost no real surface qualifies and the value becomes impractical. '
-                f'Research on Zurich specifically found that a 10-year carbon payback '
-                f'is not achievable for any panel type given its very clean grid. '
-                f'Only CdTe panels get close (~18.5 years at best). '
                 f'CEA\'s default of 800 kWh/m&sup2;/year was set for carbon-intensive grids '
                 f'like Southeast Asia and is often too low for Europe.'
                 f'{panel_section}'
@@ -427,7 +424,6 @@ def render_parameter_check(threshold_result, skill_id):
 
             # ACACIA curve — Altair chart with panel toggle
             acacia_curves = threshold_result.get("acacia_curves", {})
-            st.write(f"DEBUG: {list(acacia_curves.keys()) if acacia_curves else 'empty'}")
             if acacia_curves:
                 import altair as alt
                 panel_options = [p for p in run_pv_types if p in acacia_curves]
@@ -442,10 +438,11 @@ def render_parameter_check(threshold_result, skill_id):
                 )
                 curve = acacia_curves.get(selected_curve_panel)
                 if curve is not None:
-                    irr = curve["irradiance"] if isinstance(curve["irradiance"], list) else curve["irradiance"].tolist()
-                    imp = curve["impact"] if isinstance(curve["impact"], list) else curve["impact"].tolist()
-                    imp_min = curve["impact_min"] if isinstance(curve["impact_min"], list) else curve["impact_min"].tolist()
-                    imp_max = curve["impact_max"] if isinstance(curve["impact_max"], list) else curve["impact_max"].tolist()
+                    import numpy as np
+                    irr     = list(np.array(curve["irradiance"]).flat)
+                    imp     = list(np.array(curve["impact"]).flat)
+                    imp_min = list(np.array(curve["impact_min"]).flat)
+                    imp_max = list(np.array(curve["impact_max"]).flat)
 
                     chart_df = pd.DataFrame({"irradiance": irr, "impact": imp, "impact_min": imp_min, "impact_max": imp_max})
                     chart_df = chart_df[(chart_df["irradiance"] <= 1000) & (chart_df["impact"] >= 0)]
@@ -475,6 +472,12 @@ def render_parameter_check(threshold_result, skill_id):
                         grid=True, gridColor="#e0e0e0", gridDash=[4, 4]
                     ).configure_view(strokeWidth=0)
                     st.altair_chart(chart, use_container_width=True)
+                    st.markdown(
+                        '<span style="font-size:11px;color:#aaa;font-style:italic;">'
+                        'Source: <a href="https://acacia.arch.ethz.ch/calculator" target="_blank" '
+                        'style="color:#aaa;">acacia.arch.ethz.ch/calculator</a></span>',
+                        unsafe_allow_html=True
+                    )
 
             st.markdown(
                 f'<span style="font-size:11px;color:#aaa;margin-top:6px;display:block;font-style:italic;">'
