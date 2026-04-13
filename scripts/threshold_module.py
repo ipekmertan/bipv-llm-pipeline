@@ -278,10 +278,12 @@ def get_threshold_check(weather_header: str, cea_default: float = 800, self_cons
     match = abs(recommended - cea_default) < 50
 
     acacia_curves = {}
-    for ptype in PV_PANEL_TYPES:
-        curve = get_acacia_curve(ptype, em_grid, self_consumption, acacia_data=acacia_data)
-        if curve:
-            acacia_curves[ptype] = curve
+    data = acacia_data or fetch_acacia_curves()
+    if data:
+        for ptype in PV_PANEL_TYPES:
+            curve = get_acacia_curve(ptype, em_grid, self_consumption, acacia_data=data)
+            if curve:
+                acacia_curves[ptype] = curve
 
     return {
         "location": location,
@@ -324,3 +326,4 @@ if __name__ == "__main__":
     print(f"CEA default threshold: {result['cea_threshold']} kWh/m²/year")
     print(f"Recommended threshold: {result['recommended_threshold']} kWh/m²/year")
     print(f"Match: {result['match']}")
+
