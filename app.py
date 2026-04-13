@@ -542,7 +542,8 @@ if st.session_state.cea_data is None:
             if "weather_header" in cea_data["files"]:
                 st.session_state.threshold_result = get_threshold_check(
                     cea_data["files"]["weather_header"], cea_default=800,
-                    self_consumption=cea_data.get("pv_config", {}).get("self_consumption", 0.5)
+                    self_consumption=cea_data.get("pv_config", {}).get("self_consumption", 0.5),
+                    acacia_data=load_acacia_curves()
                 )
             st.rerun()
 
@@ -821,4 +822,5 @@ else:
                     response = call_llm(system_prompt, st.session_state.chat_history)
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
                 st.rerun()
+
 
