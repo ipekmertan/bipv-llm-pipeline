@@ -21,8 +21,10 @@ All inputs are read from the CEA project zip automatically:
   - CEA threshold   → read from scenario config if present
 """
 
+import json
 import numpy as np
 import requests
+from pathlib import Path
 
 # ── Panel constants ──────────────────────────────────────────────────────────
 # Source: CEA4 PHOTOVOLTAIC_PANELS.csv (jmccarty CACTUS, ETH Zürich, 2024)
@@ -186,8 +188,12 @@ ACACIA_CURVE_URL = "https://acacia.arch.ethz.ch/static/data/static_curve_data.js
 
 
 def fetch_acacia_curves() -> dict | None:
-    """Fetch ACACIA static curve data. Returns None on failure."""
+    """Load ACACIA static curve data from local file, fall back to URL."""
     try:
+        local = Path(__file__).parent / "static_curve_data.json"
+        if local.exists():
+            with open(local) as f:
+                return json.load(f)
         r = requests.get(ACACIA_CURVE_URL, timeout=10)
         r.raise_for_status()
         return r.json()
@@ -426,3 +432,4 @@ if __name__ == "__main__":
     if result["mccarty"]:
         print(f"McCarty closest location: {result['mccarty']['location']}")
         print(f"McCarty CPP 10yr: {result['mccarty']['cpp_10yr']} kWh/m²/year")
+
