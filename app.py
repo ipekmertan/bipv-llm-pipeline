@@ -347,26 +347,29 @@ def render_parameter_check(threshold_result, skill_id):
             else:
                 panel_section = ""
 
-            st.markdown(
+            reasoning_html = (
                 f'<div style="background:#f7f7f7;border:1px solid #e8e8e8;border-radius:8px;'
-                f'padding:12px 14px;margin-top:8px;font-size:12px;color:#555;line-height:1.65;">'
-                f'The radiation threshold is calculated using <strong>Happle et al. (2019)</strong> — '
-                f'the annual irradiation at which BIPV electricity carbon emissions equal the local grid intensity. '
-                f'For <strong>{country}</strong> (grid: <strong>{em_grid} kgCO&#x2082;/kWh</strong>), '
-                f'a cleaner grid means only high-irradiation surfaces are carbon-competitive — hence a higher threshold. '
-                f'Embodied carbon values are taken from the CEA panel database (Galimshina et al. 2024, ETH Zürich). '
-                f'CEA&#x27;s default of 800 kWh/m&sup2;/year was defined for carbon-intensive grids and is widely '
-                f'acknowledged as location-specific and often misapplied (McCarty et al. 2025). '
-                f'The value is capped between 800–1200 kWh/m&sup2;/year — the practical range for BIPV analysis.'
+                f'padding:12px 14px;margin-top:8px;font-size:12px;color:#555;line-height:1.7;">'
+                f'Every surface needs a minimum amount of sunlight to make BIPV worthwhile. '
+                f'Below this level, the panel never generates enough clean electricity to offset '
+                f'the carbon emitted when it was manufactured. '
+                f'For <strong>{country}</strong> (grid: {em_grid} kgCO&#x2082;/kWh) — '
+                f'the cleaner the grid, the harder panels are to justify on carbon grounds, '
+                f'so a cleaner grid means a higher threshold. '
+                f'Research on Zurich specifically found that a 10-year carbon payback '
+                f'is not achievable for any panel type given its very clean grid. '
+                f'Only CdTe panels get close (~18.5 years at best). '
+                f'The floor of 500 kWh/m&#x00B2;/year is the minimum for a panel '
+                f'to produce useful electricity at all, regardless of location.'
                 f'{panel_section}'
                 f'<br><span style="font-size:11px;color:#aaa;margin-top:6px;display:block;font-style:italic;">'
                 f'Happle et al. (2019). J. Phys.: Conf. Ser. 1343, 012077. &bull; '
                 f'Galimshina et al. (2024). Renew. Energy 236, 121404. &bull; '
-                f'McCarty et al. (2025). Renew. Sustain. Energy Rev. 211, 115326.</span>'
-                f'</div>',
-                unsafe_allow_html=True
+                f'McCarty et al. (2025a). RSER 211, 115326. &bull; '
+                f'McCarty et al. (2025b). J. Phys.: Conf. Ser. 3140, 032006.</span>'
+                f'</div>'
             )
-
+            st.markdown(reasoning_html, unsafe_allow_html=True)
     st.markdown('<hr style="margin:4px 0;border:none;border-top:1px solid #f0f0f0;">', unsafe_allow_html=True)
     st.markdown(
         '<div style="background:#fff8e1;color:#7c5e00;border:1px solid #ffe082;'
@@ -398,6 +401,7 @@ def build_tree():
             tree[goal][mid]["children"][sub]["children"][path[3]] = {"id": s["id"], "children": {}}
     return tree
 
+skills = load_skills_index()
 TREE = build_tree()
 
 # ── Upload screen ──────────────────────────────────────────────────────────────
@@ -695,5 +699,3 @@ else:
                     response = call_llm(system_prompt, st.session_state.chat_history)
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
                 st.rerun()
-
-
