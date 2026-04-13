@@ -19,45 +19,11 @@ The output is a clear priority ranking with a coverage strategy — not just whi
 
 ---
 
-## CEA4 Integration
+## File Source
 
-This skill runs as a CEA4 plugin. All data is read automatically via the CEA4 `InputLocator`.
+This skill reads from the uploaded CEA project zip. The app finds the relevant files automatically by filename — no manual file selection needed.
 
-**Location context** read automatically from project weather file:
-```python
-locator.get_weather()  # → city, latitude, longitude
-```
-
-**Solar irradiation data** accessed via InputLocator:
-```python
-locator.get_solar_radiation_csv(period="annually")
-# → solar_irradiation_annually_buildings.csv
-# Columns: irradiation_roof, irradiation_wall_south, irradiation_wall_east,
-#           irradiation_wall_west, irradiation_wall_north (all kWh)
-```
-
-**PV yield data** accessed via InputLocator:
-```python
-locator.get_pv_results(panel_type="PV1")
-# → PV_PV{n}_total_buildings.csv
-# Columns: E_PV_gen_kWh, area_PV_m2 per surface
-```
-
-**Envelope properties** accessed via InputLocator:
-```python
-locator.get_building_envelope_properties()
-# → building-properties/envelope.csv
-# Columns: wwr_north, wwr_south, wwr_east, wwr_west
-```
-
-**Surroundings geometry** accessed via InputLocator:
-```python
-locator.get_surroundings_geometry()
-# → surroundings.shp
-# Used to assess shading context per surface
-```
-
----
+**Location context** is taken from the project's weather file (`.epw`) found inside the zip.
 
 ## Scoring Logic
 
@@ -209,3 +175,14 @@ recommended_coverage = f(self_sufficiency_target, budget_constraint, surface_are
 - Poll result: "Ranked list (Option A > B > C)" — second most requested output format
 - Poll result: "CO2SavingsPotential/CHF — clients could rank themselves up as far as they are willing to go/pay"
 - Interview — Interviewee A: spent significant time understanding which surfaces to prioritize — this skill provides that answer directly
+
+---
+
+## PV Simulation Config — Design Implications
+
+The app injects inferred simulation parameters into context. Use them to comment on design choices:
+
+- `panel-on-wall: NO` → flag that facade surfaces are excluded and suggest enabling them
+- `panel-on-roof: NO` → flag that roof surfaces are excluded
+- Multiple panel types → note that thresholds differ per type (cSi needs more irradiation than CdTe to be carbon-viable)
+- Single panel type → suggest running others for comparison
