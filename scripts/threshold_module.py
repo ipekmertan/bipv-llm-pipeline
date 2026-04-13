@@ -1,19 +1,34 @@
 """
-Radiation threshold calculator based on Happle et al. 2019
-(Identifying carbon emission reduction potentials of BIPV in high-density cities in Southeast Asia)
+Radiation threshold calculator for BIPV.
 
-Formula (Equation 1 from paper):
-em_BIPV(I) = EmBIPV / (I × η_BIPV × PR_BIPV × A_BIPV × LT_BIPV)
+Primary method: Happle et al. 2019 (Equation 1)
+  em_BIPV(I) = EmBIPV / (I × η_BIPV × PR_BIPV × A_BIPV × LT_BIPV)
+  Threshold = irradiation at which em_BIPV = em_grid
+  → I_threshold = EmBIPV / (em_grid × η_BIPV × PR_BIPV × LT_BIPV)
 
-Threshold = irradiation at which em_BIPV = em_grid
-→ I_threshold = EmBIPV / (em_grid × η_BIPV × PR_BIPV × A_BIPV × LT_BIPV)
+Secondary method: ACACIA curve lookup (ETH Zürich)
+  Fetches pre-computed LCA impact vs irradiance curves and finds
+  the zero crossing — used for visualization only.
+
+Reference table: McCarty et al. 2025
+  "Watt's the Limit?" CISBAT, J. Phys. Conf. Ser. 3140 032006
+  Provides threshold values per location × technology × metric
+  (Yspec, carbon intensity, CPP) for contextualisation.
+
+All inputs are read from the CEA project zip automatically:
+  - Grid emissions  → EPW weather file country code → GRID_INTENSITY lookup
+  - Panel types     → detected from PV_PV{n}_* filenames in the zip
+  - CEA threshold   → read from scenario config if present
 """
 
-# BIPV panel constants per panel type
+import numpy as np
+import requests
+
+# ── Panel constants ──────────────────────────────────────────────────────────
 # Source: CEA4 PHOTOVOLTAIC_PANELS.csv (jmccarty CACTUS, ETH Zürich, 2024)
-# Embodied carbon values consistent with Galimshina et al. (2024),
-#   Renewable Energy 236, 121404
+# Embodied carbon consistent with Galimshina et al. (2024), Renewable Energy 236, 121404
 # PR = 0.75 per Galimshina 2024; LT = 25yr as in CEA database
+
 PR_BIPV = 0.75
 LT_BIPV = 25
 
@@ -21,30 +36,35 @@ PV_PANEL_TYPES = {
     "PV1": {
         "description": "Monocrystalline Si (cSi)",
         "em_bipv": 255.77,   # kgCO2eq/m²
-        "eta": 0.1846,       # efficiency
+        "eta": 0.1846,       # panel efficiency
+        "acacia_key": "monocrystalline",
     },
     "PV2": {
         "description": "Multicrystalline Si (mcSi)",
         "em_bipv": 191.18,
         "eta": 0.1750,
+        "acacia_key": "monocrystalline",
     },
     "PV3": {
         "description": "Cadmium Telluride (CdTe)",
         "em_bipv": 47.55,
         "eta": 0.1760,
+        "acacia_key": "cdte",
     },
     "PV4": {
         "description": "CIGS",
         "em_bipv": 75.91,
         "eta": 0.0994,
+        "acacia_key": "cigs",
     },
 }
 
-# Default fallback (PV1 = mono-Si, most common)
 DEFAULT_PANEL = "PV1"
 
+# ── Grid intensity lookup ────────────────────────────────────────────────────
 # IEA 2023 grid carbon intensity by country (kgCO2/kWh)
 # Sources: IEA Electricity Information 2023, Our World in Data, Ember Climate
+
 GRID_INTENSITY = {
     # Europe
     "Albania": 0.020, "Andorra": 0.050, "Austria": 0.107, "Belarus": 0.288,
@@ -111,7 +131,7 @@ GRID_INTENSITY = {
     "Vanuatu": 0.680,
 }
 
-# EPW country name variations → canonical name
+# EPW country code → canonical country name
 EPW_COUNTRY_MAP = {
     "CHN": "China", "CHE": "Switzerland", "DEU": "Germany",
     "FRA": "France", "GBR": "United Kingdom", "USA": "United States",
@@ -134,6 +154,81 @@ EPW_COUNTRY_MAP = {
     "MEX": "Mexico", "ZUG": "Switzerland",
 }
 
+# ── McCarty 2025 reference table ─────────────────────────────────────────────
+# All values in kWh/m²/year
+# Source: McCarty et al. 2025, J. Phys. Conf. Ser. 3140 032006
+
+MCCARTY_2025 = {
+    "singapore": {
+        "grid_kgco2_kwh": 0.566,
+        "csi":  {"yspec": 524, "carbon_intensity": 137, "cpp_10yr": 325},
+        "cdte": {"yspec": 500, "carbon_intensity": 65,  "cpp_10yr": 155},
+        "opv":  {"yspec": 506, "carbon_intensity": 116, "cpp_10yr": 274},
+    },
+    "hamburg": {
+        "grid_kgco2_kwh": 0.298,
+        "csi":  {"yspec": 522, "carbon_intensity": 227, "cpp_10yr": 730},
+        "cdte": {"yspec": 503, "carbon_intensity": 110, "cpp_10yr": 351},
+        "opv":  {"yspec": 500, "carbon_intensity": 199, "cpp_10yr": 638},
+    },
+    "zurich": {
+        "grid_kgco2_kwh": 0.046,
+        "csi":  {"yspec": 500, "carbon_intensity": 1405, "cpp_10yr": 4512},
+        "cdte": {"yspec": 504, "carbon_intensity": 678,  "cpp_10yr": 2184},
+        "opv":  {"yspec": 500, "carbon_intensity": 1219, "cpp_10yr": 3930},
+    },
+}
+
+# ── ACACIA curve lookup ───────────────────────────────────────────────────────
+# Used for visualization only — fetches pre-computed LCA impact vs irradiance curves
+
+ACACIA_CURVE_URL = "https://acacia.arch.ethz.ch/static/data/static_curve_data.json"
+
+
+def fetch_acacia_curves() -> dict | None:
+    """Fetch ACACIA static curve data. Returns None on failure."""
+    try:
+        r = requests.get(ACACIA_CURVE_URL, timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except Exception:
+        return None
+
+
+def _nearest_key(obj: dict, value: float) -> str:
+    keys = sorted([float(k) for k in obj.keys()])
+    return f"{min(keys, key=lambda k: abs(k - value)):.2f}"
+
+
+def get_acacia_curve(panel_type: str, em_grid: float, self_consumption: float = 0.5) -> dict | None:
+    """
+    Fetch the ACACIA LCA impact curve for a given panel type and grid emissions.
+    Returns dict with irradiance and impact arrays, or None if unavailable.
+    self_consumption is derived from PV + demand CSVs in the zip.
+    """
+    data = fetch_acacia_curves()
+    if data is None:
+        return None
+
+    acacia_key = PV_PANEL_TYPES.get(panel_type, PV_PANEL_TYPES[DEFAULT_PANEL])["acacia_key"]
+    panel_key = next(
+        (k for k in data if k.lower().replace(" ", "") == acacia_key),
+        list(data.keys())[0]
+    )
+    grid_key = _nearest_key(data[panel_key], em_grid)
+    sc_key   = _nearest_key(data[panel_key][grid_key], self_consumption)
+    series   = data[panel_key][grid_key][sc_key]
+
+    return {
+        "irradiance": np.array(series["Irradiance"]),
+        "impact":     np.array(series["Impact"]),
+        "panel_key":  panel_key,
+        "grid_key":   float(grid_key),
+        "sc_key":     float(sc_key),
+    }
+
+
+# ── EPW parsing ───────────────────────────────────────────────────────────────
 
 def parse_epw_location(weather_header: str) -> dict:
     """Parse location info from EPW header line."""
@@ -151,12 +246,10 @@ def parse_epw_location(weather_header: str) -> dict:
         try: result["longitude"] = float(parts[7])
         except: pass
 
-    # Try to resolve country name
     cc = result["country_code"].upper()
     if cc in EPW_COUNTRY_MAP:
         result["country"] = EPW_COUNTRY_MAP[cc]
     else:
-        # Try city-based lookup for common cases
         city = result["city"].lower()
         if any(x in city for x in ["shanghai", "beijing", "shenzhen", "guangzhou"]):
             result["country"] = "China"
@@ -167,6 +260,8 @@ def parse_epw_location(weather_header: str) -> dict:
 
     return result
 
+
+# ── Threshold calculation ─────────────────────────────────────────────────────
 
 def calculate_threshold(em_grid: float, panel_type: str = None, capped: bool = True) -> float:
     """
@@ -207,15 +302,45 @@ def calculate_thresholds_all_panels_uncapped(em_grid: float) -> dict:
     }
 
 
-def get_threshold_check(weather_header: str, cea_default: float = 800) -> dict:
+def get_mccarty_context(em_grid: float, panel_type: str) -> dict:
     """
-    Full threshold check for a given location.
-    Returns dict with all info needed to render the UI boxes.
+    Find the closest McCarty 2025 reference location for a given grid emission value
+    and return the corresponding threshold values for the panel technology.
+    """
+    tech_key = (
+        "cdte" if PV_PANEL_TYPES.get(panel_type, {}).get("acacia_key") == "cdte" else
+        "opv"  if PV_PANEL_TYPES.get(panel_type, {}).get("acacia_key") == "organic" else
+        "csi"
+    )
+    loc_name, loc_data = min(
+        MCCARTY_2025.items(),
+        key=lambda kv: abs(kv[1]["grid_kgco2_kwh"] - em_grid)
+    )
+    return {
+        "location":         loc_name,
+        "grid_reference":   loc_data["grid_kgco2_kwh"],
+        "yspec":            loc_data[tech_key]["yspec"],
+        "carbon_intensity": loc_data[tech_key]["carbon_intensity"],
+        "cpp_10yr":         loc_data[tech_key]["cpp_10yr"],
+    }
+
+
+# ── Main entry point ──────────────────────────────────────────────────────────
+
+def get_threshold_check(weather_header: str, cea_default: float = 800,
+                        self_consumption: float = 0.5) -> dict:
+    """
+    Full threshold check for a given CEA project location.
+    Returns dict with all info needed to render the UI and inform the LLM.
+
+    Args:
+        weather_header:   First line of the EPW file (LOCATION,...)
+        cea_default:      The threshold value currently set in CEA (kWh/m²/year)
+        self_consumption: Fraction derived from PV + demand CSVs in the zip
     """
     location = parse_epw_location(weather_header)
-    country = location["country"]
-
-    em_grid = GRID_INTENSITY.get(country, None)
+    country  = location["country"]
+    em_grid  = GRID_INTENSITY.get(country)
 
     if em_grid is None:
         return {
@@ -223,30 +348,47 @@ def get_threshold_check(weather_header: str, cea_default: float = 800) -> dict:
             "country": country,
             "em_grid": None,
             "recommended_threshold": None,
+            "thresholds_by_panel": None,
+            "thresholds_uncapped": None,
+            "mccarty": None,
+            "acacia_curves": None,
             "cea_threshold": cea_default,
             "match": None,
-            "error": f"Grid intensity not found for {country}"
+            "error": f"Grid intensity not found for '{country}'",
         }
 
-    thresholds = calculate_thresholds_all_panels(em_grid)
+    thresholds          = calculate_thresholds_all_panels(em_grid)
     thresholds_uncapped = calculate_thresholds_all_panels_uncapped(em_grid)
-    recommended = thresholds[DEFAULT_PANEL]
-    match = abs(recommended - cea_default) < 50
+    recommended         = thresholds[DEFAULT_PANEL]
+    match               = abs(recommended - cea_default) < 50
+
+    # ACACIA curves for all simulated panels (for visualization)
+    acacia_curves = {}
+    for ptype in PV_PANEL_TYPES:
+        curve = get_acacia_curve(ptype, em_grid, self_consumption)
+        if curve:
+            acacia_curves[ptype] = curve
+
+    # McCarty 2025 context for default panel
+    mccarty = get_mccarty_context(em_grid, DEFAULT_PANEL)
 
     return {
-        "location": location,
-        "country": country,
-        "em_grid": em_grid,
+        "location":             location,
+        "country":              country,
+        "em_grid":              em_grid,
         "recommended_threshold": recommended,
-        "thresholds_by_panel": thresholds,
-        "thresholds_uncapped": thresholds_uncapped,
-        "cea_threshold": cea_default,
-        "match": match,
-        "error": None
+        "thresholds_by_panel":  thresholds,
+        "thresholds_uncapped":  thresholds_uncapped,
+        "mccarty":              mccarty,
+        "acacia_curves":        acacia_curves,
+        "cea_threshold":        cea_default,
+        "match":                match,
+        "error":                None,
     }
 
 
-# Skills where radiation threshold matters
+# ── Skills where threshold is relevant ───────────────────────────────────────
+
 THRESHOLD_RELEVANT_SKILLS = {
     "site-potential--solar-availability--surface-irradiation",
     "site-potential--solar-availability--temporal-availability--seasonal-patterns",
@@ -265,7 +407,6 @@ THRESHOLD_RELEVANT_SKILLS = {
 
 
 if __name__ == "__main__":
-    # Test with the Zug weather header from the uploaded zip
     header = "LOCATION,Inducity-Zug,-,-,MN7,999,47.176,8.513,1,422"
     result = get_threshold_check(header)
     print(f"Location: {result['location']['city']}, {result['country']}")
@@ -273,3 +414,6 @@ if __name__ == "__main__":
     print(f"CEA default threshold: {result['cea_threshold']} kWh/m²/year")
     print(f"Recommended threshold: {result['recommended_threshold']} kWh/m²/year")
     print(f"Match: {result['match']}")
+    if result["mccarty"]:
+        print(f"McCarty closest location: {result['mccarty']['location']}")
+        print(f"McCarty CPP 10yr: {result['mccarty']['cpp_10yr']} kWh/m²/year")
