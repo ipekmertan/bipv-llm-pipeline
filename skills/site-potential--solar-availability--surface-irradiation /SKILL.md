@@ -18,38 +18,13 @@ This skill combines two analyses:
 
 ---
 
-## CEA4 Integration
+## File Source
 
-This skill runs as a CEA4 plugin. It does not require the user to upload or locate any files manually. All data is read automatically via the CEA4 `InputLocator` object, which knows the full project structure.
+This skill reads from the uploaded CEA project zip. The app finds the relevant files automatically by filename — no manual file selection needed.
 
-**Location context** is read automatically from the project's weather file:
-```python
-locator.get_weather()  # → path to .epw file, e.g. "Shanghai_2009.epw"
-# The .epw file header contains latitude, longitude, and city name
-# This is passed to the LLM for all contextual framing
-```
-
-**Building names** are read from the zone geometry:
-```python
-locator.get_zone_geometry()  # → zone.shp with all building names (e.g. B1000, B1001...)
-```
-
-**Solar irradiation data** is read from CEA4 outputs:
-```python
-locator.get_solar_radiation_csv()  # → solar_irradiation_annually.csv etc.
-```
-
-The user never needs to know where these files are. The plugin finds them automatically from the active CEA4 scenario.
-
----
-
+**Location context** is taken from the project's weather file (`.epw`) found inside the zip.
 ## Data Sources
 
-**Primary CEA files accessed via InputLocator:**
-
-| Scale | File |
-|-------|------|
-| District | `solar_irradiation_annually.csv` |
 | Cluster | `solar_irradiation_annually_buildings.csv` (filtered to named buildings) |
 | Building | `solar_irradiation_annually_buildings.csv` (single building row) |
 
@@ -106,13 +81,11 @@ Applied on top of the irradiation values to classify each surface:
 Usable fraction = sum of usable surface area ÷ total available surface area
 ```
 
-**Important:** CEA outputs total kWh, not kWh/m². Surface area is read from the building geometry file (`zone.shp`) via the InputLocator to convert units. If unavailable, the skill uses relative surface comparisons and flags the limitation.
+**Important:** CEA outputs total kWh, not kWh/m². Surface area is read from the building geometry file (`zone.shp`) from the zip to convert units. If unavailable, the skill uses relative surface comparisons and flags the limitation.
 
 **CEA threshold parameter:** CEA has a built-in radiation threshold (default = 800 kWh/m²/year). This skill reads that value from the CEA project config and uses it — respecting any changes the user has made to the default.
 
 ---
-
-
 
 The standard radiation viability threshold used in BIPV practice is **800 kWh/m²/year** for facades, **1000 kWh/m²/year** for roofs.
 
