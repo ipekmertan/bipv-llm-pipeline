@@ -334,13 +334,10 @@ def build_data_summary(cea_data, selected_buildings=None, scale="District"):
 def call_llm(system_prompt, messages):
     import time
     api_key = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
-    # Use faster model for explain/design modes — higher Groq rate limit
-    if "Explain the numbers" in system_prompt or "Design implication" in system_prompt:
-        model = "llama-3.1-8b-instant"
-    else:
-        model = "llama-3.3-70b-versatile"
-    max_retries = 3
-    retry_delays = [10, 20, 30]  # seconds between retries
+    # Use 8b-instant for all modes — much higher Groq free tier rate limit
+    model = "llama-3.1-8b-instant"
+    max_retries = 4
+    retry_delays = [15, 30, 45, 60]  # seconds between retries
     for attempt in range(max_retries):
         try:
             resp = requests.post(
