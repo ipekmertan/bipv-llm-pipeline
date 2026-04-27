@@ -20,42 +20,13 @@ It covers:
 
 ---
 
-## CEA4 Integration
+## File Source
 
-This skill runs as a CEA4 plugin. All data is read automatically via the CEA4 `InputLocator`.
+This skill reads from the uploaded CEA project zip. The app finds the relevant files automatically by filename — no manual file selection needed.
 
-**Location context** read automatically from project weather file:
-```python
-locator.get_weather()  # → city, latitude, longitude
-```
-
-**PV yield data** accessed via InputLocator:
-```python
-locator.get_pv_results(panel_type="PV1")
-# → PV_PV1_total.csv (8760 hourly rows)
-# → PV_PV1_total_buildings.csv (annual totals per building)
-```
-
-**Energy demand data** accessed via InputLocator:
-```python
-locator.get_total_demand()
-# → demand/Total_demand.csv (annual totals per building)
-# Key column: E_sys_MWhyr
-
-locator.get_demand_results_file(building="B{id}")
-# → demand/B{id}.csv (8760 hourly rows per building)
-# Key column: E_sys_kWh
-```
-
----
-
+**Location context** is taken from the project's weather file (`.epw`) found inside the zip.
 ## Data Sources
 
-**Primary CEA files accessed via InputLocator:**
-
-| File | What it provides |
-|------|-----------------|
-| `PV_PV{n}_total.csv` | Hourly PV generation (kWh) |
 | `PV_PV{n}_total_buildings.csv` | Annual PV generation per building (kWh) |
 | `demand/Total_demand.csv` | Annual electricity demand per building (MWhyr) |
 | `demand/B{id}.csv` | Hourly electricity demand per building (kWh) |
