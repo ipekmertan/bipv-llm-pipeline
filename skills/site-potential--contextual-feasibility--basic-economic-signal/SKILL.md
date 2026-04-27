@@ -16,21 +16,11 @@ This is a **pre-design** skill — it helps the architect understand the economi
 
 ---
 
-## CEA4 Integration
+## File Source
 
-This skill runs as a CEA4 plugin.
+This skill reads from the uploaded CEA project zip. The app finds the relevant files automatically by filename — no manual file selection needed.
 
-**Location context** read automatically from the project weather file:
-```python
-locator.get_weather()
-# → .epw file → extracts city, country, latitude, longitude
-# This location is passed directly to the internet search
-```
-
-**No CEA simulation data is used by this skill.** All information comes from internet search based on the project location.
-
----
-
+**Location context** is taken from the project's weather file (`.epw`) found inside the zip.
 ## Data Sources
 
 **Primary source: Internet search**
