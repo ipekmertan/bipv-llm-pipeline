@@ -121,19 +121,19 @@ def chart_solar_irradiation(cea_data, selected_buildings, output_mode):
         df_agg = df_agg[df_agg["kWh"] > 0].sort_values("kWh", ascending=False)
         chart = alt.Chart(df_agg).mark_bar(cornerRadiusTopLeft=3,
                                             cornerRadiusTopRight=3).encode(
-            x=alt.X("kWh:Q", title="Total annual irradiation (kWh/yr)"),
-            y=alt.Y("surface:N", sort="-x", title=""),
+            x=alt.X("surface:N", sort="-y", title="Surface", axis=alt.Axis(labelAngle=0)),
+            y=alt.Y("kWh:Q", title="Total annual irradiation (kWh/yr)"),
             color=alt.Color("surface:N", scale=alt.Scale(
                 domain=surface_order, range=color_range), legend=None),
             tooltip=["surface", alt.Tooltip("kWh:Q", format=",.0f", title="kWh/yr")]
-        ).properties(title="Annual irradiation by surface orientation", height=160)
+        ).properties(title="Annual irradiation by surface orientation", height=200)
         return chart
 
     # Explain numbers / Design implication — per building stacked bars
     n_buildings = df_b[name_col].nunique()
     chart = alt.Chart(df_long).mark_bar().encode(
-        x=alt.X("kWh:Q", title="Annual irradiation (kWh/yr)"),
-        y=alt.Y("building:N", title=""),
+        x=alt.X("building:N", title="", axis=alt.Axis(labelAngle=-30)),
+        y=alt.Y("kWh:Q", title="Annual irradiation (kWh/yr)"),
         color=alt.Color("surface:N", scale=alt.Scale(
             domain=surface_order, range=color_range),
             legend=alt.Legend(title="Surface")),
@@ -141,7 +141,7 @@ def chart_solar_irradiation(cea_data, selected_buildings, output_mode):
         tooltip=["building", "surface", alt.Tooltip("kWh:Q", format=",.0f", title="kWh/yr")]
     ).properties(
         title="Annual irradiation by building and surface",
-        height=max(120, n_buildings * 35)
+        height=250
     )
     return chart
 
