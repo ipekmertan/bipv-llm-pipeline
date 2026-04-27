@@ -392,14 +392,14 @@ Scale: {scale}{building_context}
 {mode_block}
 
 ## Skill specification
-{skill_md}
+{skill_md[:2000]}
 
 ## CEA data
-{cea_summary}
+{cea_summary[:3000]}
 
 Use actual numbers from the data where available. If a specific value is missing, note it briefly in one sentence, then proceed using industry-standard defaults clearly labelled as estimates — e.g. grid emissions ~0.4 kgCO₂/kWh for Central Europe, panel cost ~250 €/m², system lifetime 25 years, performance ratio 0.75.
 Do NOT describe, mention, or suggest visualizations or charts — these are generated automatically by the app.
-Do NOT use markdown symbols like ** or * for formatting. Plain prose only."""
+Do NOT use markdown headers (#) or numbered lists. You MAY use **bold** sparingly for key numbers and surface names."""
 
 
 def render_parameter_check(threshold_result, skill_id):
