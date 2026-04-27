@@ -768,9 +768,16 @@ else:
                 st.markdown(f"**Goal** · *{st.session_state.tree_goal}*")
             else:
                 st.markdown("**Step 2 — What do you want to understand?**")
+                GOAL_TOOLTIPS = {
+                    "Site Potential": "Can this site support solar integration?",
+                    "Performance Estimation": "What does the system deliver?",
+                    "Impact and Viability": "Is this strategy worth integrating?",
+                    "Optimize My Design": "How should I design the building for BIPV?",
+                }
                 for goal in TREE.keys():
                     label = goal.replace("Impact and Viability", "Impact & Viability")
-                    if st.button(label, key=f"goal_{goal}"):
+                    tooltip = GOAL_TOOLTIPS.get(goal, "")
+                    if st.button(label, key=f"goal_{goal}", help=tooltip):
                         st.session_state.tree_goal = goal
                         st.session_state.tree_sub = None
                         st.session_state.tree_subsub = None
