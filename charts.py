@@ -58,17 +58,17 @@ def _monthly_from_hourly(df, col):
 def chart_solar_irradiation(cea_data, selected_buildings, output_mode):
     """
     Solar irradiation skills.
-    Key takeaway     → top-5 buildings bar (annual)
-    Explain numbers  → all buildings bar + seasonal breakdown side by side
-    Design impl.     → seasonal heatmap-style grouped bar
+    Uses per-surface columns: irradiation_roof[kWh], irradiation_wall_south[kWh], etc.
+    Key takeaway     → stacked bar by surface orientation
+    Explain numbers  → stacked bar + seasonal breakdown
+    Design impl.     → surface comparison horizontal bar
     """
     df_b = cea_data["files"].get("solar_irradiation_annually_buildings.csv")
     if df_b is None:
         return None
 
-    rad_col = _find_col(df_b, "kWh", "radiation", "irr", "Wh")
     name_col = _find_col(df_b, "name", "Name", "building")
-    if rad_col is None or name_col is None:
+    if name_col is None:
         return None
 
     df_b = df_b.copy()
@@ -77,49 +77,73 @@ def chart_solar_irradiation(cea_data, selected_buildings, output_mode):
     if df_b.empty:
         return None
 
-    df_b = df_b.sort_values(rad_col, ascending=False)
+    # Find surface-specific columns (exclude windows)
+    surface_map = {
+        "Roof":        next((c for c in df_b.columns if "roof" in c.lower() and "window" not in c.lower()), None),
+        "South wall":  next((c for c in df_b.columns if "south" in c.lower() and "window" not in c.lower()), None),
+        "East wall":   next((c for c in df_b.columns if "east" in c.lower() and "window" not in c.lower()), None),
+        "West wall":   next((c for c in df_b.columns if "west" in c.lower() and "window" not in c.lower()), None),
+        "North wall":  next((c for c in df_b.columns if "north" in c.lower() and "window" not in c.lower()), None),
+    }
+    found = {k: v for k, v in surface_map.items() if v is not None and df_b[v].sum() > 0}
+
+    if not found:
+        # Fallback: use first kWh column found
+        rad_col = _find_col(df_b, "kWh", "radiation", "irr")
+        if rad_col is None:
+            return None
+        df_b = df_b.sort_values(rad_col, ascending=False).head(10)
+        return alt.Chart(df_b).mark_bar(color=C_PV, cornerRadiusTopLeft=3,
+                                         cornerRadiusTopRight=3).encode(
+            x=alt.X(f"{rad_col}:Q", title="Annual irradiation (kWh/yr)"),
+            y=alt.Y(f"{name_col}:N", sort="-x", title=""),
+            tooltip=[name_col, alt.Tooltip(f"{rad_col}:Q", format=",.0f")]
+        ).properties(title="Annual irradiation by building", height=max(100, len(df_b) * 25))
+
+    # Build long-format dataframe for surface breakdown
+    rows = []
+    for _, row in df_b.iterrows():
+        for surface, col in found.items():
+            rows.append({
+                "building": row[name_col],
+                "surface": surface,
+                "kWh": float(row[col]) if row[col] == row[col] else 0
+            })
+    import pandas as pd_inner
+    df_long = pd_inner.DataFrame(rows)
+
+    surface_order = [s for s in ["Roof", "South wall", "East wall", "West wall", "North wall"] if s in found]
+    color_range = [C_PV, C_SURPLUS, "#e8b86d", "#a8d5b5", C_NEUTRAL][:len(surface_order)]
 
     if output_mode == "Key takeaway":
-        top = df_b.head(5)
-        chart = alt.Chart(top).mark_bar(color=C_PV, cornerRadiusTopLeft=3,
-                                        cornerRadiusTopRight=3).encode(
-            x=alt.X(f"{rad_col}:Q", title="Annual irradiation (kWh/m²/yr)"),
-            y=alt.Y(f"{name_col}:N", sort="-x", title=""),
-            tooltip=[name_col, alt.Tooltip(f"{rad_col}:Q", format=".0f",
-                                           title="kWh/m²/yr")]
-        ).properties(title="Top surfaces by annual irradiation", height=160)
+        # Aggregate across buildings, show total by surface
+        df_agg = df_long.groupby("surface")["kWh"].sum().reset_index()
+        df_agg = df_agg[df_agg["kWh"] > 0].sort_values("kWh", ascending=False)
+        chart = alt.Chart(df_agg).mark_bar(cornerRadiusTopLeft=3,
+                                            cornerRadiusTopRight=3).encode(
+            x=alt.X("kWh:Q", title="Total annual irradiation (kWh/yr)"),
+            y=alt.Y("surface:N", sort="-x", title=""),
+            color=alt.Color("surface:N", scale=alt.Scale(
+                domain=surface_order, range=color_range), legend=None),
+            tooltip=["surface", alt.Tooltip("kWh:Q", format=",.0f", title="kWh/yr")]
+        ).properties(title="Annual irradiation by surface orientation", height=160)
         return chart
 
-    # Explain numbers / Design implication — all buildings + seasonal
-    df_s = cea_data["files"].get("solar_irradiation_seasonally_buildings.csv")
-    bar = alt.Chart(df_b).mark_bar(color=C_PV, cornerRadiusTopLeft=3,
-                                   cornerRadiusTopRight=3).encode(
-        x=alt.X(f"{rad_col}:Q", title="Annual irradiation (kWh/m²/yr)"),
-        y=alt.Y(f"{name_col}:N", sort="-x", title=""),
-        tooltip=[name_col, alt.Tooltip(f"{rad_col}:Q", format=".0f",
-                                       title="kWh/m²/yr")]
-    ).properties(title="Annual irradiation by building", height=max(120, len(df_b) * 22))
-
-    if df_s is not None and output_mode == "Explain the numbers":
-        season_col = _find_col(df_s, "season", "Season")
-        val_col = _find_col(df_s, "kWh", "radiation", "irr")
-        if season_col and val_col and name_col in df_s.columns:
-            df_s2 = df_s.copy()
-            if selected_buildings:
-                df_s2 = df_s2[df_s2[name_col].isin(selected_buildings)]
-            seasonal = alt.Chart(df_s2).mark_bar(cornerRadiusTopLeft=3,
-                                                  cornerRadiusTopRight=3).encode(
-                x=alt.X(f"{val_col}:Q", title="kWh/m²"),
-                y=alt.Y(f"{name_col}:N", sort="-x", title=""),
-                color=alt.Color(f"{season_col}:N",
-                                scale=alt.Scale(range=[C_PV, C_DEMAND,
-                                                        C_SURPLUS, C_NEUTRAL])),
-                tooltip=[name_col, season_col,
-                         alt.Tooltip(f"{val_col}:Q", format=".0f")]
-            ).properties(title="Seasonal breakdown", height=max(120, len(df_b) * 22))
-            return bar | seasonal
-
-    return bar
+    # Explain numbers / Design implication — per building stacked bars
+    n_buildings = df_b[name_col].nunique()
+    chart = alt.Chart(df_long).mark_bar().encode(
+        x=alt.X("kWh:Q", title="Annual irradiation (kWh/yr)"),
+        y=alt.Y("building:N", title=""),
+        color=alt.Color("surface:N", scale=alt.Scale(
+            domain=surface_order, range=color_range),
+            legend=alt.Legend(title="Surface")),
+        order=alt.Order("surface:N"),
+        tooltip=["building", "surface", alt.Tooltip("kWh:Q", format=",.0f", title="kWh/yr")]
+    ).properties(
+        title="Annual irradiation by building and surface",
+        height=max(120, n_buildings * 35)
+    )
+    return chart
 
 
 def chart_energy_generation(cea_data, selected_buildings, output_mode):
