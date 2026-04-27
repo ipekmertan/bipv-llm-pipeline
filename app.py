@@ -13,25 +13,21 @@ from threshold_module import get_threshold_check, THRESHOLD_RELEVANT_SKILLS
 
 # Map each skill to the simulations whose parameters need checking
 SKILL_SIMULATION_MAP = {
-    # Solar Irradiation only
     "site-potential--solar-availability--surface-irradiation": ["solar_irradiation"],
     "site-potential--solar-availability--temporal-availability--seasonal-patterns": ["solar_irradiation"],
     "site-potential--solar-availability--temporal-availability--daily-patterns": ["solar_irradiation"],
     "site-potential--envelope-suitability": ["solar_irradiation"],
     "site-potential--massing-and-shading-strategy": ["solar_irradiation"],
-    # PV Yield only
     "performance-estimation--energy-generation": ["pv"],
     "optimize-my-design--panel-type-tradeoff": ["pv"],
     "optimize-my-design--surface-prioritization": ["pv"],
     "optimize-my-design--envelope-simplification": ["pv"],
     "optimize-my-design--construction-and-integration": ["pv"],
-    # PV + Demand
     "performance-estimation--self-sufficiency": ["pv", "demand"],
     "impact-and-viability--carbon-impact--operational-carbon-footprint": ["pv", "demand"],
     "impact-and-viability--carbon-impact--carbon-payback": ["pv", "demand"],
     "impact-and-viability--economic-viability--cost-analysis": ["pv", "demand"],
     "impact-and-viability--economic-viability--investment-payback": ["pv", "demand"],
-    # No parameter check
     "site-potential--contextual-feasibility--infrastructure-readiness": [],
     "site-potential--contextual-feasibility--regulatory-constraints": [],
     "site-potential--contextual-feasibility--basic-economic-signal": [],
@@ -78,11 +74,9 @@ def load_skill_md(skill_id):
     return ""
 
 def get_building_names(cea_data):
-    """Extract building names from irradiation buildings file."""
     df = cea_data["files"].get("solar_irradiation_annually_buildings.csv")
     if df is not None and "name" in df.columns:
         return sorted(df["name"].tolist())
-    # fallback: try PV buildings file
     df = cea_data["files"].get("PV_PV1_total_buildings.csv")
     if df is not None and "name" in df.columns:
         return sorted(df["name"].tolist())
@@ -155,7 +149,6 @@ def extract_cea_zip(uploaded_file):
         if "demand_annually.csv" in result["files"]: sims.append("Demand")
         result["available_simulations"] = sims
 
-        # Infer PV simulation config from output data
         pv_types_run = [p for p in ["PV1","PV2","PV3","PV4"]
                         if f"PV_{p}_total.csv" in result["files"]]
         pv_config = {"pv_types": pv_types_run, "panel_on_roof": None, "panel_on_wall": None}
@@ -168,8 +161,8 @@ def extract_cea_zip(uploaded_file):
                 pv_config["panel_on_roof"] = bool(roof_area > 0)
                 pv_config["panel_on_wall"] = bool(wall_area > 0)
                 break
-        # Calculate self-consumption ratio from PV generation + demand files
-        sc = 0.5  # default
+
+        sc = 0.5
         if pv_types_run:
             import numpy as np
             pv_df = result["files"].get(f"PV_{pv_types_run[0]}_total.csv")
@@ -188,6 +181,69 @@ def extract_cea_zip(uploaded_file):
         result["pv_config"] = pv_config
     return result
 
+
+# ── FIX 1: Compact CSV summaries — no raw rows sent to LLM ────────────────────
+def summarize_dataframe(fname, df, selected_buildings=None):
+    """Extract key statistics from a dataframe instead of sending raw rows."""
+    if selected_buildings and "name" in df.columns:
+        df = df[df["name"].isin(selected_buildings)]
+
+    n_rows = df.shape[0]
+    cols = ", ".join(df.columns)
+
+    # Solar irradiation files
+    if "solar_irradiation" in fname:
+        rad_col = next((c for c in df.columns if "kWh" in c or "radiation" in c.lower() or "irr" in c.lower()), None)
+        if rad_col:
+            lines = [f"### {fname} ({n_rows} rows)"]
+            lines.append(f"Radiation column: {rad_col}")
+            lines.append(f"Total: {df[rad_col].sum():.0f} | Mean: {df[rad_col].mean():.0f} | "
+                        f"Max: {df[rad_col].max():.0f} | Min: {df[rad_col].min():.0f} kWh/m²/yr")
+            if "name" in df.columns:
+                top3 = df.nlargest(3, rad_col)[["name", rad_col]]
+                lines.append("Top 3 buildings: " + "; ".join(f"{r['name']}: {r[rad_col]:.0f}" for _, r in top3.iterrows()))
+            return "\n".join(lines)
+
+    # PV yield files
+    if fname.startswith("PV_") and "_total" in fname:
+        gen_col = next((c for c in df.columns if "E_PV_gen" in c or "E_PV" in c), None)
+        area_col = next((c for c in df.columns if "area" in c.lower() or "_m2" in c.lower()), None)
+        lines = [f"### {fname} ({n_rows} rows)"]
+        if gen_col:
+            lines.append(f"Total yield: {df[gen_col].sum():.0f} kWh/yr | "
+                        f"Mean per building: {df[gen_col].mean():.0f} kWh/yr | "
+                        f"Max: {df[gen_col].max():.0f} kWh/yr")
+        if area_col:
+            lines.append(f"Total area: {df[area_col].sum():.0f} m²")
+        if "name" in df.columns and gen_col:
+            top3 = df.nlargest(3, gen_col)[["name", gen_col]]
+            lines.append("Top 3: " + "; ".join(f"{r['name']}: {r[gen_col]:.0f} kWh" for _, r in top3.iterrows()))
+        return "\n".join(lines)
+
+    # Demand files
+    if "demand" in fname.lower() or fname == "Total_demand.csv":
+        demand_col = next((c for c in df.columns if "E_sys" in c or "GRID" in c or "total" in c.lower()), None)
+        lines = [f"### {fname} ({n_rows} rows)"]
+        if demand_col:
+            lines.append(f"Total demand: {df[demand_col].sum():.0f} kWh/yr | "
+                        f"Mean: {df[demand_col].mean():.0f} kWh/yr | "
+                        f"Max: {df[demand_col].max():.0f} kWh/yr")
+        else:
+            lines.append(f"Columns: {cols}")
+        return "\n".join(lines)
+
+    # PHOTOVOLTAIC_PANELS.csv — send full (it's small reference data)
+    if fname == "PHOTOVOLTAIC_PANELS.csv":
+        return f"### {fname}\n{df.to_csv(index=False)}"
+
+    # GRID.csv — send full (it's tiny)
+    if fname == "GRID.csv":
+        return f"### {fname}\n{df.to_csv(index=False)}"
+
+    # Fallback — schema only, no rows
+    return f"### {fname} ({n_rows} rows)\nColumns: {cols}"
+
+
 def build_data_summary(cea_data, selected_buildings=None, scale="District"):
     lines = []
     if "weather_header" in cea_data["files"]:
@@ -198,17 +254,16 @@ def build_data_summary(cea_data, selected_buildings=None, scale="District"):
         lines.append(f"## Selected buildings\n{', '.join(selected_buildings)}\n")
 
     pv_types_relevant = any(k.startswith("PV_PV") for k in (cea_data.get("files") or {}))
+
+    # FIX 1 applied: use summarize_dataframe instead of df.head(10).to_csv()
     for fname in ["solar_irradiation_annually.csv","solar_irradiation_annually_buildings.csv",
                   "solar_irradiation_seasonally.csv","demand_annually.csv",
                   "PV_PV1_total.csv","PV_PV2_total.csv","PV_PV3_total.csv","PV_PV4_total.csv",
                   "PHOTOVOLTAIC_PANELS.csv","GRID.csv","Total_demand.csv"]:
         df = cea_data["files"].get(fname)
         if df is not None:
-            # Filter to selected buildings if applicable
-            if selected_buildings and "name" in df.columns:
-                df = df[df["name"].isin(selected_buildings)]
-            lines.append(f"### {fname}\n{df.shape[0]}x{df.shape[1]}\n{', '.join(df.columns)}\n{df.head(10).to_csv(index=False)}")
-    # Inject PV simulation config for relevant skills
+            lines.append(summarize_dataframe(fname, df, selected_buildings=selected_buildings))
+
     pv_config = cea_data.get("pv_config", {})
     if pv_config and pv_types_relevant:
         config_lines = ["### PV Simulation Configuration (inferred from outputs)"]
@@ -223,6 +278,7 @@ def build_data_summary(cea_data, selected_buildings=None, scale="District"):
         lines.append("\n".join(config_lines))
 
     return "\n".join(lines)
+
 
 def call_llm(system_prompt, messages):
     api_key = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
@@ -239,6 +295,7 @@ def call_llm(system_prompt, messages):
     except Exception as e:
         return f"⚠️ API error: {e}"
 
+
 def build_system_prompt(skill_md, cea_summary, output_mode, scale, selected_buildings=None):
     building_context = ""
     if selected_buildings:
@@ -254,14 +311,13 @@ Output mode: {output_mode} | Scale: {scale}{building_context}
 
 Follow the skill spec for the chosen output mode and scale. Use actual numbers from the data. Plain language for a design presentation. If a file is missing, say which CEA simulation needs to be run."""
 
+
 def render_parameter_check(threshold_result, skill_id):
-    """Render parameter check contextually for the selected skill."""
     if not threshold_result or threshold_result.get("error"):
         return
 
     simulations = SKILL_SIMULATION_MAP.get(skill_id, None)
 
-    # No parameter check applicable
     if simulations is not None and len(simulations) == 0:
         st.markdown(
             '<div style="background:#f5f5f5;border:1px solid #e0e0e0;border-radius:8px;'
@@ -276,7 +332,6 @@ def render_parameter_check(threshold_result, skill_id):
     em_grid = threshold_result["em_grid"]
     thresholds = threshold_result.get("thresholds_by_panel", {})
 
-    # Only show parameter check for skills that use PV simulations
     if simulations is not None and "pv" not in simulations:
         st.markdown(
             '<div style="background:#f0fff4;border:1px solid #b2dfdb;border-radius:8px;'
@@ -286,7 +341,6 @@ def render_parameter_check(threshold_result, skill_id):
         )
         return
 
-    # Detect which PV types were actually run (presence of PV_PVx_total.csv)
     cea_data = st.session_state.get("cea_data", {})
     available_files = cea_data.get("files", {}) if cea_data else {}
     run_pv_types = [
@@ -302,24 +356,20 @@ def render_parameter_check(threshold_result, skill_id):
     type_thresholds = {p: thresholds.get(p, 1200) for p in run_pv_types}
     type_thresholds_uncapped = {p: thresholds_uncapped.get(p, 1200) for p in run_pv_types}
 
-    # Use the highest threshold (most conservative — only carbon-viable surfaces included)
     max_ptype = max(type_thresholds, key=lambda p: type_thresholds[p])
     recommended = type_thresholds[max_ptype]
     driving_panel = PV_PANEL_TYPES.get(max_ptype, {})
 
-    # Simulation label
     if len(run_pv_types) == 1:
         sim_label = f'Photovoltaic simulation<br><span style="font-size:11px;color:#999;">{run_pv_types[0]} — {PV_PANEL_TYPES.get(run_pv_types[0], {}).get("description", "")}</span>'
     else:
         types_str = ", ".join([f"{p} ({PV_PANEL_TYPES.get(p,{}).get('description','')})" for p in run_pv_types])
         sim_label = f'Photovoltaic simulation<br><span style="font-size:11px;color:#999;">{types_str}</span>'
 
-    # Info text — one sentence
     pr_label = threshold_result.get("pr_label", "PR 0.75")
     if len(run_pv_types) == 1:
         raw = int(type_thresholds_uncapped.get(run_pv_types[0], recommended))
         cap = int(recommended)
-        panel_name = PV_PANEL_TYPES.get(run_pv_types[0], {}).get("description", "")
         if raw == cap:
             info_text = (
                 f'In <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), '
@@ -366,14 +416,13 @@ def render_parameter_check(threshold_result, skill_id):
     with c2:
         st.markdown("`annual-radiation-threshold`")
     with c3:
-        # Status-driven styling: unverifiable=blue, wrong=red, correct=green
-        status = "unverifiable"  # threshold cannot be read from the zip
+        status = "unverifiable"
         tooltip = "Cannot verify — check this value in CEA"
         if status == "wrong":
             bg, border = "#fff0f0", "#ffcccc"
         elif status == "correct":
             bg, border = "#f0fff4", "#b2dfdb"
-        else:  # unverifiable
+        else:
             bg, border = "#e3f2fd", "#90caf9"
         st.markdown(
             f'<div style="background:{bg};border:1px solid {border};border-radius:6px;'
@@ -428,7 +477,6 @@ def render_parameter_check(threshold_result, skill_id):
                 unsafe_allow_html=True
             )
 
-            # ACACIA curve — Altair chart with panel toggle
             acacia_curves = threshold_result.get("acacia_curves", {})
             if acacia_curves:
                 import altair as alt
@@ -446,24 +494,17 @@ def render_parameter_check(threshold_result, skill_id):
                 if curve is not None:
                     irr = [float(x) for x in curve["irradiance"]]
                     imp = [float(x) for x in curve["impact"]]
-
                     chart_df = pd.DataFrame({"irradiance": irr, "impact": imp})
                     chart_df = chart_df[(chart_df["irradiance"] <= 1000) & (chart_df["impact"] >= 0)]
                     y_max = min(float(chart_df["impact"].iloc[0]) * 1.05, 2.0)
-
-                    line = alt.Chart(chart_df).mark_line(
-                        color="#c07800", strokeWidth=2
-                    ).encode(
-                        x=alt.X("irradiance:Q", title="Annual irradiance (kWh/sqm/a)",
-                                scale=alt.Scale(domain=[0, 1000])),
-                        y=alt.Y("impact:Q", title="Device intensity (kgCO2e/kWh)",
-                                scale=alt.Scale(domain=[0, y_max]))
+                    line = alt.Chart(chart_df).mark_line(color="#c07800", strokeWidth=2).encode(
+                        x=alt.X("irradiance:Q", title="Annual irradiance (kWh/sqm/a)", scale=alt.Scale(domain=[0, 1000])),
+                        y=alt.Y("impact:Q", title="Device intensity (kgCO2e/kWh)", scale=alt.Scale(domain=[0, y_max]))
                     )
                     grid_df = pd.DataFrame({"y": [float(em_grid)]})
-                    grid_line = alt.Chart(grid_df).mark_rule(
-                        color="black", strokeWidth=1.5
-                    ).encode(y=alt.Y("y:Q", scale=alt.Scale(domain=[0, y_max])))
-
+                    grid_line = alt.Chart(grid_df).mark_rule(color="black", strokeWidth=1.5).encode(
+                        y=alt.Y("y:Q", scale=alt.Scale(domain=[0, y_max]))
+                    )
                     chart = (line + grid_line).properties(height=220).configure_axis(
                         grid=True, gridColor="#e0e0e0", gridDash=[4, 4]
                     ).configure_view(strokeWidth=0)
@@ -518,7 +559,8 @@ for k, v in [("cea_data", None), ("chat_history", []),
               ("analysis_ran", False), ("threshold_result", None),
               ("param_check_hidden", False),
               ("selected_building", None), ("selected_cluster", []),
-              ("reasoning_open", False), ("reasoning_threshold", False)]:
+              ("reasoning_open", False), ("reasoning_threshold", False),
+              ("cached_system_prompt", None)]:   # FIX 2: cache slot
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -546,9 +588,6 @@ if st.session_state.cea_data is None:
 
 # ── Analysis screen ────────────────────────────────────────────────────────────
 else:
-
-
-    # ── Tree section (full width) ──────────────────────────────────────────────
     with st.container():
         st.markdown("### Build your analysis")
         sims = st.session_state.cea_data["available_simulations"]
@@ -570,6 +609,7 @@ else:
                     st.session_state.analysis_ran = False
                     st.session_state.selected_building = None
                     st.session_state.selected_cluster = []
+                    st.session_state.cached_system_prompt = None  # FIX 2: clear cache on new analysis
                     st.rerun()
 
         # Building / Cluster selector
@@ -580,15 +620,12 @@ else:
                 if st.session_state.tree_scale == "Building":
                     st.markdown("**Select building**")
                     chosen = st.selectbox(
-                        "Building",
-                        building_names,
+                        "Building", building_names,
                         index=building_names.index(st.session_state.selected_building)
                         if st.session_state.selected_building in building_names else 0,
-                        label_visibility="collapsed",
-                        key="building_selector"
+                        label_visibility="collapsed", key="building_selector"
                     )
                     st.session_state.selected_building = chosen
-
                 elif st.session_state.tree_scale == "Cluster":
                     n = len(st.session_state.selected_cluster)
                     st.markdown(
@@ -597,11 +634,9 @@ else:
                     )
                     st.markdown("**Select buildings for cluster**")
                     chosen = st.multiselect(
-                        "Buildings",
-                        building_names,
+                        "Buildings", building_names,
                         default=st.session_state.selected_cluster,
-                        label_visibility="collapsed",
-                        key="cluster_selector"
+                        label_visibility="collapsed", key="cluster_selector"
                     )
                     st.session_state.selected_cluster = chosen
 
@@ -620,6 +655,7 @@ else:
                         st.session_state.tree_subsub = None
                         st.session_state.tree_mode = None
                         st.session_state.analysis_ran = False
+                        st.session_state.cached_system_prompt = None  # FIX 2: clear on new path
                         st.rerun()
 
         # Step 3: Topic
@@ -636,6 +672,7 @@ else:
                         st.session_state.tree_subsub = None
                         st.session_state.tree_mode = None
                         st.session_state.analysis_ran = False
+                        st.session_state.cached_system_prompt = None
                         if not node["children"]:
                             st.session_state.skill_id = node["id"]
                             st.session_state.skill_name = topic
@@ -655,6 +692,7 @@ else:
                             st.session_state.tree_subsub = child
                             st.session_state.tree_mode = None
                             st.session_state.analysis_ran = False
+                            st.session_state.cached_system_prompt = None
                             st.session_state.skill_id = child_node["id"]
                             st.session_state.skill_name = child
                             st.rerun()
@@ -675,11 +713,11 @@ else:
                     if st.button(mode, key=f"mode_{mode}"):
                         st.session_state.tree_mode = mode
                         st.session_state.analysis_ran = False
+                        st.session_state.cached_system_prompt = None
                         st.rerun()
 
         # Run button
         if st.session_state.tree_mode and st.session_state.skill_id and not st.session_state.analysis_ran:
-            # Validate building/cluster selection
             scale = st.session_state.tree_scale
             ready_to_run = True
             if scale == "Building" and not st.session_state.selected_building:
@@ -700,7 +738,6 @@ else:
         col_a, col_b, col_c = st.columns(3)
         with col_a:
             if st.button("← Go back"):
-                # Step back one level
                 if st.session_state.tree_mode:
                     st.session_state.tree_mode = None
                     st.session_state.analysis_ran = False
@@ -719,12 +756,13 @@ else:
                     st.session_state.selected_building = None
                     st.session_state.selected_cluster = []
                 st.session_state.chat_history = []
+                st.session_state.cached_system_prompt = None
                 st.rerun()
         with col_b:
             if st.button("↺ Start over"):
                 for k in ["tree_scale","tree_goal","tree_sub","tree_subsub",
                           "tree_mode","skill_id","skill_name","analysis_ran",
-                          "selected_building","selected_cluster"]:
+                          "selected_building","selected_cluster","cached_system_prompt"]:
                     st.session_state[k] = None if k != "selected_cluster" else []
                 st.session_state.chat_history = []
                 st.rerun()
@@ -733,12 +771,12 @@ else:
                 for k in ["cea_data","tree_scale","tree_goal","tree_sub","tree_subsub",
                           "tree_mode","skill_id","skill_name","analysis_ran",
                           "threshold_result","param_check_hidden",
-                          "selected_building","selected_cluster"]:
+                          "selected_building","selected_cluster","cached_system_prompt"]:
                     st.session_state[k] = None if k != "selected_cluster" else []
                 st.session_state.chat_history = []
                 st.rerun()
 
-    # ── Analysis section (full width, below tree) ──────────────────────────────
+    # ── Analysis section ───────────────────────────────────────────────────────
     st.markdown("---")
     with st.container():
         st.markdown("### Analysis")
@@ -757,12 +795,15 @@ else:
                 selected_buildings=selected_buildings,
                 scale=scale
             )
+            # FIX 2: Build system prompt once and cache it
             system_prompt = build_system_prompt(
                 skill_md, cea_summary,
                 st.session_state.tree_mode,
                 scale,
                 selected_buildings=selected_buildings
             )
+            st.session_state.cached_system_prompt = system_prompt
+
             user_msg = (f"Run the **{st.session_state.skill_name}** analysis at "
                        f"**{scale}** scale in **{st.session_state.tree_mode}** mode."
                        + (f" Focus on buildings: {', '.join(selected_buildings)}." if selected_buildings else "")
@@ -795,27 +836,12 @@ else:
             followup = st.text_input("Ask a follow-up…", key="fu",
                                     placeholder="e.g. Which building has the best south facade?")
             if st.button("Send") and followup.strip():
-                scale = st.session_state.tree_scale
-                selected_buildings = None
-                if scale == "Building" and st.session_state.selected_building:
-                    selected_buildings = [st.session_state.selected_building]
-                elif scale == "Cluster" and st.session_state.selected_cluster:
-                    selected_buildings = st.session_state.selected_cluster
-
-                skill_md = load_skill_md(st.session_state.skill_id or "")
-                cea_summary = build_data_summary(
-                    st.session_state.cea_data,
-                    selected_buildings=selected_buildings,
-                    scale=scale or ""
-                )
-                system_prompt = build_system_prompt(
-                    skill_md, cea_summary,
-                    st.session_state.tree_mode or "",
-                    scale or "",
-                    selected_buildings=selected_buildings
-                )
+                # FIX 2 + FIX 3: use cached system prompt, send only last 4 messages
+                system_prompt = st.session_state.get("cached_system_prompt") or ""
                 st.session_state.chat_history.append({"role": "user", "content": followup})
+                recent_history = st.session_state.chat_history[-4:]  # FIX 3: cap history
                 with st.spinner("Thinking…"):
-                    response = call_llm(system_prompt, st.session_state.chat_history)
+                    response = call_llm(system_prompt, recent_history)
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
                 st.rerun()
+
