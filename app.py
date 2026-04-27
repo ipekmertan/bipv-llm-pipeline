@@ -66,22 +66,11 @@ def load_acacia_curves():
     with open(local) as f:
         return json.load(f)
 
-def load_skill_md(skill_id, max_chars=3000):
-    """Load skill spec, truncating to keep payload within Groq limits."""
+def load_skill_md(skill_id):
     for folder in SKILLS_DIR.iterdir():
         if folder.name.strip() == skill_id:
             md = folder / "SKILL.md"
-            if md.exists():
-                text = md.read_text()
-                if len(text) <= max_chars:
-                    return text
-                # Keep the Purpose and Output Modes sections — most LLM-relevant
-                # Cut at max_chars but try to end at a section boundary
-                truncated = text[:max_chars]
-                last_section = truncated.rfind("\n## ")
-                if last_section > max_chars * 0.5:
-                    truncated = truncated[:last_section]
-                return truncated + "\n\n[Skill spec truncated for brevity]"
+            if md.exists(): return md.read_text()
     return ""
 
 def get_building_names(cea_data):
@@ -171,8 +160,6 @@ def extract_cea_zip(uploaded_file):
                                for d in ["north","south","east","west"])
                 pv_config["panel_on_roof"] = bool(roof_area > 0)
                 pv_config["panel_on_wall"] = bool(wall_area > 0)
-                pv_config["roof_area_m2"] = round(float(roof_area), 1)
-                pv_config["wall_area_m2"] = round(float(wall_area), 1)
                 break
 
         sc = 0.5
@@ -324,18 +311,10 @@ def build_data_summary(cea_data, selected_buildings=None, scale="District"):
             config_lines.append(f"Panel types simulated: {', '.join(pv_config['pv_types'])}")
         if pv_config.get("panel_on_roof") is not None:
             roof_status = "YES" if pv_config["panel_on_roof"] else "NO — roof surfaces excluded"
-            roof_area = pv_config.get("roof_area_m2")
-            if roof_area:
-                config_lines.append(f"panel-on-roof: {roof_status} | installed roof area: {roof_area} m²")
-            else:
-                config_lines.append(f"panel-on-roof: {roof_status}")
+            config_lines.append(f"panel-on-roof: {roof_status}")
         if pv_config.get("panel_on_wall") is not None:
             wall_status = "YES" if pv_config["panel_on_wall"] else "NO — wall/facade surfaces excluded"
-            wall_area = pv_config.get("wall_area_m2")
-            if wall_area:
-                config_lines.append(f"panel-on-wall: {wall_status} | installed wall area: {wall_area} m²")
-            else:
-                config_lines.append(f"panel-on-wall: {wall_status}")
+            config_lines.append(f"panel-on-wall: {wall_status}")
         lines.append("\n".join(config_lines))
 
     return "\n".join(lines)
@@ -344,10 +323,13 @@ def build_data_summary(cea_data, selected_buildings=None, scale="District"):
 def call_llm(system_prompt, messages):
     import time
     api_key = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
-    # Use 8b-instant for all modes — much higher Groq free tier rate limit
-    model = "llama-3.1-8b-instant"
-    max_retries = 4
-    retry_delays = [15, 30, 45, 60]  # seconds between retries
+    # Use faster model for explain/design modes — higher Groq rate limit
+    if "Explain the numbers" in system_prompt or "Design implication" in system_prompt:
+        model = "llama-3.1-8b-instant"
+    else:
+        model = "llama-3.3-70b-versatile"
+    max_retries = 3
+    retry_delays = [10, 20, 30]  # seconds between retries
     for attempt in range(max_retries):
         try:
             resp = requests.post(
@@ -376,11 +358,13 @@ def build_system_prompt(skill_md, cea_summary, output_mode, scale, selected_buil
         building_context = f"\nFocus your analysis specifically on: {', '.join(selected_buildings)}."
 
     mode_instructions = {
-        "Key takeaway": """OUTPUT MODE: Key takeaway — RULES:
-- Write 2-3 bullet points using "- " as the bullet character. Group related ideas naturally — the finding and what it means can live in the same bullet if they flow together.
-- Every response must cover: the key number with its name, a plain-language explanation of what it means and why it matters (no jargon without explanation), and a concrete action starting with "For BIPV," with real numbers.
-- You MAY use **bold** for one key number.
-- Tone: direct and clear, like a knowledgeable colleague giving a quick briefing. Never vague.""",
+        "Key takeaway": """OUTPUT MODE: Key takeaway — STRICT RULES:
+- Maximum 3 sentences. No exceptions.
+- One headline finding with a specific number.
+- One sentence of context or comparison.
+- One sentence of design implication.
+- DO NOT show calculations, bullet lists, intermediate steps, or methodology.
+- DO NOT explain how you arrived at the number — just state it.""",
 
         "Explain the numbers": """OUTPUT MODE: Explain the numbers — RULES:
 - Walk through the key numbers clearly, one at a time.
@@ -412,25 +396,7 @@ Scale: {scale}{building_context}
 
 Use actual numbers from the data where available. If a specific value is missing, note it briefly in one sentence, then proceed using industry-standard defaults clearly labelled as estimates — e.g. grid emissions ~0.4 kgCO₂/kWh for Central Europe, panel cost ~250 €/m², system lifetime 25 years, performance ratio 0.75.
 Do NOT describe, mention, or suggest visualizations or charts — these are generated automatically by the app.
-Do NOT use markdown headers (#), bullet points (-), or numbered lists. You MAY use **bold** sparingly for key numbers and surface names."""
-
-    # Cap total prompt size to avoid 413 errors
-    max_total = 6000
-    prompt = f"""You are a BIPV expert helping architects interpret CEA4 simulation results.
-Scale: {scale}{building_context}
-
-{mode_block}
-
-## Skill specification
-{skill_md[:2000]}
-
-## CEA data
-{cea_summary[:3000]}
-
-Use actual numbers from the data where available. If a specific value is missing, note it briefly in one sentence, then proceed using industry-standard defaults clearly labelled as estimates — e.g. grid emissions ~0.4 kgCO₂/kWh for Central Europe, panel cost ~250 €/m², system lifetime 25 years, performance ratio 0.75.
-Do NOT describe, mention, or suggest visualizations or charts — these are generated automatically by the app.
-Do NOT use markdown headers (#), bullet points (-), or numbered lists. You MAY use **bold** sparingly for key numbers and surface names."""
-    return prompt
+Do NOT use markdown symbols like ** or * for formatting. Plain prose only."""
 
 
 def render_parameter_check(threshold_result, skill_id):
@@ -794,8 +760,27 @@ else:
                 st.markdown(f"**Topic** · *{st.session_state.tree_sub}*")
             else:
                 st.markdown("**Step 3 — Topic**")
+                TOPIC_TOOLTIPS = {
+                    # Site Potential topics
+                    "Solar Availability": "Where and when is solar energy available on this site?",
+                    "Envelope Suitability": "Which parts of the building envelope are suitable for solar integration?",
+                    "Massing & Shading Strategy": "How should the building form be shaped to maximize solar access?",
+                    "Contextual Feasibility": "Does the surrounding context support or limit solar integration?",
+                    # Performance Estimation topics
+                    "Energy Generation": "How much energy can this system generate?",
+                    "Self Sufficiency": "To what extent can this building cover its own energy demand?",
+                    # Impact and Viability topics
+                    "Carbon Impact": "How does this design affect lifecycle carbon emissions?",
+                    "Economic Viability": "Does this design make financial sense over its lifetime?",
+                    # Optimize My Design topics
+                    "Panel Type Trade-off": "Which panel type makes the most sense for this design?",
+                    "Surface Prioritisation": "Where should I place the panels?",
+                    "Envelope Simplification": "What small geometric changes would improve performance?",
+                    "Construction & Integration": "How can this be integrated into the building?",
+                }
                 for topic, node in topics.items():
-                    if st.button(topic, key=f"sub_{topic}"):
+                    topic_tooltip = TOPIC_TOOLTIPS.get(topic, "")
+                    if st.button(topic, key=f"sub_{topic}", help=topic_tooltip):
                         st.session_state.tree_sub = topic
                         st.session_state.tree_subsub = None
                         st.session_state.tree_subsubsub = None
@@ -816,8 +801,20 @@ else:
                     st.markdown(f"**Analysis** · *{st.session_state.tree_subsub}*")
                 else:
                     st.markdown("**Step 4 — Analysis**")
+                    ANALYSIS_TOOLTIPS = {
+                        "Surface Irradiation": "Where is solar energy available on this site?",
+                        "Temporal Availability": "When is solar energy available on this site?",
+                        "Infrastructure Readiness": "Is the necessary infrastructure in place to support solar integration?",
+                        "Regulatory Constraints": "What legal constraints shape how solar systems can be integrated here?",
+                        "Basic Economic Signal": "Is solar integration likely to be financially worthwhile here?",
+                        "Operational Carbon Footprint": "How much carbon will this building emit during operation?",
+                        "Carbon Payback Period": "When does this design pay back its embodied carbon?",
+                        "Cost Analysis": "Is BIPV-generated electricity cost-competitive with grid electricity?",
+                        "Investment Payback": "How long until the system recovers its initial investment?",
+                    }
                     for child, child_node in node["children"].items():
-                        if st.button(child, key=f"subsub_{child}"):
+                        child_tooltip = ANALYSIS_TOOLTIPS.get(child, "")
+                        if st.button(child, key=f"subsub_{child}", help=child_tooltip):
                             st.session_state.tree_subsub = child
                             st.session_state.tree_subsubsub = None
                             st.session_state.tree_mode = None
@@ -839,8 +836,13 @@ else:
                     st.markdown(f"**Sub-analysis** · *{st.session_state.tree_subsubsub}*")
                 else:
                     st.markdown("**Step 4b — Sub-analysis**")
+                    SUBANALYSIS_TOOLTIPS = {
+                        "Seasonal Patterns": "How does solar availability change across the seasons?",
+                        "Daily Patterns": "How does solar availability vary across a typical day?",
+                    }
                     for grandchild, grandchild_node in child_node["children"].items():
-                        if st.button(grandchild, key=f"subsubsub_{grandchild}"):
+                        grandchild_tooltip = SUBANALYSIS_TOOLTIPS.get(grandchild, "")
+                        if st.button(grandchild, key=f"subsubsub_{grandchild}", help=grandchild_tooltip):
                             st.session_state.tree_subsubsub = grandchild
                             st.session_state.tree_mode = None
                             st.session_state.analysis_ran = False
