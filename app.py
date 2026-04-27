@@ -119,10 +119,10 @@ def extract_cea_zip(uploaded_file):
                 try: result["files"][fpath.name] = pd.read_csv(fpath)
                 except: pass
 
-        for fname in ["Total_demand.csv"]:
-            fpath = scenario / "outputs" / "data" / "demand" / fname
-            if fpath.exists():
-                try: result["files"][fname] = pd.read_csv(fpath)
+        demand_dir = scenario / "outputs" / "data" / "demand"
+        if demand_dir.exists():
+            for fpath in demand_dir.glob("*.csv"):
+                try: result["files"][fpath.name] = pd.read_csv(fpath)
                 except: pass
 
         fpath = scenario / "inputs" / "database" / "COMPONENTS" / "CONVERSION" / "PHOTOVOLTAIC_PANELS.csv"
@@ -220,6 +220,18 @@ def summarize_dataframe(fname, df, selected_buildings=None):
             lines.append("Top 3: " + "; ".join(f"{r['name']}: {r[gen_col]:.0f} kWh" for _, r in top3.iterrows()))
         return "\n".join(lines)
 
+    # Individual building demand files (B1000.csv etc.)
+    if fname.startswith("B") and fname.endswith(".csv") and len(fname) <= 10:
+        demand_col = next((c for c in df.columns if "E_sys" in c or "GRID" in c), None)
+        pv_col = next((c for c in df.columns if "E_PV" in c), None)
+        lines = [f"### {fname} — building demand ({len(df)} hourly rows)"]
+        if demand_col:
+            lines.append(f"Annual demand: {df[demand_col].sum():.0f} kWh | Peak hour: {df[demand_col].max():.1f} kWh")
+        if pv_col:
+            lines.append(f"Annual PV gen: {df[pv_col].sum():.0f} kWh")
+        lines.append(f"Columns: {', '.join(df.columns[:10])}{'...' if len(df.columns) > 10 else ''}")
+        return "\n".join(lines)
+
     # Demand files
     if "demand" in fname.lower() or fname == "Total_demand.csv":
         demand_col = next((c for c in df.columns if "E_sys" in c or "GRID" in c or "total" in c.lower()), None)
@@ -264,6 +276,19 @@ def build_data_summary(cea_data, selected_buildings=None, scale="District"):
         if df is not None:
             lines.append(summarize_dataframe(fname, df, selected_buildings=selected_buildings))
 
+    # Include individual building demand files — filter to selected if applicable
+    building_demand_files = sorted([
+        fname for fname in cea_data["files"]
+        if fname.startswith("B") and fname.endswith(".csv") and len(fname) <= 10
+    ])
+    if selected_buildings:
+        building_demand_files = [f for f in building_demand_files
+                                 if f.replace(".csv", "") in selected_buildings]
+    for fname in building_demand_files:
+        df = cea_data["files"].get(fname)
+        if df is not None:
+            lines.append(summarize_dataframe(fname, df))
+
     pv_config = cea_data.get("pv_config", {})
     if pv_config and pv_types_relevant:
         config_lines = ["### PV Simulation Configuration (inferred from outputs)"]
@@ -281,19 +306,30 @@ def build_data_summary(cea_data, selected_buildings=None, scale="District"):
 
 
 def call_llm(system_prompt, messages):
+    import time
     api_key = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
-    try:
-        resp = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={"model": "llama-3.3-70b-versatile", "max_tokens": 1500,
-                  "messages": [{"role": "system", "content": system_prompt}] + messages},
-            timeout=60
-        )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
-    except Exception as e:
-        return f"⚠️ API error: {e}"
+    max_retries = 3
+    retry_delays = [10, 20, 30]  # seconds between retries
+    for attempt in range(max_retries):
+        try:
+            resp = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={"model": "llama-3.3-70b-versatile", "max_tokens": 1500,
+                      "messages": [{"role": "system", "content": system_prompt}] + messages},
+                timeout=60
+            )
+            resp.raise_for_status()
+            return resp.json()["choices"][0]["message"]["content"]
+        except requests.exceptions.HTTPError as e:
+            if resp.status_code == 429 and attempt < max_retries - 1:
+                wait = retry_delays[attempt]
+                with st.spinner(f"Rate limit hit — waiting {wait}s before retry ({attempt + 1}/{max_retries - 1})…"):
+                    time.sleep(wait)
+                continue
+            return f"⚠️ API error: {e}"
+        except Exception as e:
+            return f"⚠️ API error: {e}"
 
 
 def build_system_prompt(skill_md, cea_summary, output_mode, scale, selected_buildings=None):
@@ -844,4 +880,3 @@ else:
                     response = call_llm(system_prompt, recent_history)
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
                 st.rerun()
-
