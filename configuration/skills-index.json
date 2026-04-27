@@ -156,11 +156,11 @@
     },
     {
       "id": "impact-and-viability--economic-viability--investment-payback",
-      "display_name": "Investment Payback",
+      "display_name": "Payback Period",
       "position_in_tree": [
         "Impact and Viability",
         "Economic Viability",
-        "Investment Payback"
+        "Payback Period"
       ],
       "tooltip": "How long does it take for energy savings to recover the installation cost of this BIPV system?",
       "data_source": "CEA + calculation",
