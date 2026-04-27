@@ -66,11 +66,22 @@ def load_acacia_curves():
     with open(local) as f:
         return json.load(f)
 
-def load_skill_md(skill_id):
+def load_skill_md(skill_id, max_chars=3000):
+    """Load skill spec, truncating to keep payload within Groq limits."""
     for folder in SKILLS_DIR.iterdir():
         if folder.name.strip() == skill_id:
             md = folder / "SKILL.md"
-            if md.exists(): return md.read_text()
+            if md.exists():
+                text = md.read_text()
+                if len(text) <= max_chars:
+                    return text
+                # Keep the Purpose and Output Modes sections — most LLM-relevant
+                # Cut at max_chars but try to end at a section boundary
+                truncated = text[:max_chars]
+                last_section = truncated.rfind("\n## ")
+                if last_section > max_chars * 0.5:
+                    truncated = truncated[:last_section]
+                return truncated + "\n\n[Skill spec truncated for brevity]"
     return ""
 
 def get_building_names(cea_data):
@@ -397,6 +408,24 @@ Scale: {scale}{building_context}
 Use actual numbers from the data where available. If a specific value is missing, note it briefly in one sentence, then proceed using industry-standard defaults clearly labelled as estimates — e.g. grid emissions ~0.4 kgCO₂/kWh for Central Europe, panel cost ~250 €/m², system lifetime 25 years, performance ratio 0.75.
 Do NOT describe, mention, or suggest visualizations or charts — these are generated automatically by the app.
 Do NOT use markdown symbols like ** or * for formatting. Plain prose only."""
+
+    # Cap total prompt size to avoid 413 errors
+    max_total = 6000
+    prompt = f"""You are a BIPV expert helping architects interpret CEA4 simulation results.
+Scale: {scale}{building_context}
+
+{mode_block}
+
+## Skill specification
+{skill_md[:2000]}
+
+## CEA data
+{cea_summary[:3000]}
+
+Use actual numbers from the data where available. If a specific value is missing, note it briefly in one sentence, then proceed using industry-standard defaults clearly labelled as estimates — e.g. grid emissions ~0.4 kgCO₂/kWh for Central Europe, panel cost ~250 €/m², system lifetime 25 years, performance ratio 0.75.
+Do NOT describe, mention, or suggest visualizations or charts — these are generated automatically by the app.
+Do NOT use markdown symbols like ** or * for formatting. Plain prose only."""
+    return prompt
 
 
 def render_parameter_check(threshold_result, skill_id):
