@@ -171,6 +171,8 @@ def extract_cea_zip(uploaded_file):
                                for d in ["north","south","east","west"])
                 pv_config["panel_on_roof"] = bool(roof_area > 0)
                 pv_config["panel_on_wall"] = bool(wall_area > 0)
+                pv_config["roof_area_m2"] = round(float(roof_area), 1)
+                pv_config["wall_area_m2"] = round(float(wall_area), 1)
                 break
 
         sc = 0.5
@@ -322,10 +324,18 @@ def build_data_summary(cea_data, selected_buildings=None, scale="District"):
             config_lines.append(f"Panel types simulated: {', '.join(pv_config['pv_types'])}")
         if pv_config.get("panel_on_roof") is not None:
             roof_status = "YES" if pv_config["panel_on_roof"] else "NO — roof surfaces excluded"
-            config_lines.append(f"panel-on-roof: {roof_status}")
+            roof_area = pv_config.get("roof_area_m2")
+            if roof_area:
+                config_lines.append(f"panel-on-roof: {roof_status} | installed roof area: {roof_area} m²")
+            else:
+                config_lines.append(f"panel-on-roof: {roof_status}")
         if pv_config.get("panel_on_wall") is not None:
             wall_status = "YES" if pv_config["panel_on_wall"] else "NO — wall/facade surfaces excluded"
-            config_lines.append(f"panel-on-wall: {wall_status}")
+            wall_area = pv_config.get("wall_area_m2")
+            if wall_area:
+                config_lines.append(f"panel-on-wall: {wall_status} | installed wall area: {wall_area} m²")
+            else:
+                config_lines.append(f"panel-on-wall: {wall_status}")
         lines.append("\n".join(config_lines))
 
     return "\n".join(lines)
@@ -366,14 +376,11 @@ def build_system_prompt(skill_md, cea_summary, output_mode, scale, selected_buil
         building_context = f"\nFocus your analysis specifically on: {', '.join(selected_buildings)}."
 
     mode_instructions = {
-        "Key takeaway": """OUTPUT MODE: Key takeaway — STRICT RULES:
-- Maximum 3 sentences. No exceptions.
-- Sentence 1 — Lead with the best-performing surface or result: name it, give the specific number, and say why it matters. Start with the surface/finding, not the building name. Example: "The roof of B1000 receives 1,613,514 kWh/yr — well above the viability threshold."
-- Sentence 2 — One comparison or context sentence that helps the architect understand the scale or ranking.
-- Sentence 3 — One concrete, specific design action the architect should take. Include actual numbers where possible (area, percentage, kWh target). Never say "maximise" without saying what to maximise to. Example: "Prioritise full roof coverage (~500 m²) before considering facade surfaces."
-- DO NOT use numbered lists or labels like "1." "2." "Headline:" "Context:" — just write the sentences directly.
-- DO NOT be vague — every sentence must contain a specific number or named surface.
-- You MAY use **bold** for the key number or surface name to aid readability.""",
+        "Key takeaway": """OUTPUT MODE: Key takeaway — RULES:
+- Write 2-3 bullet points using "- " as the bullet character. Group related ideas naturally — the finding and what it means can live in the same bullet if they flow together.
+- Every response must cover: the key number with its name, a plain-language explanation of what it means and why it matters (no jargon without explanation), and a concrete action starting with "For BIPV," with real numbers.
+- You MAY use **bold** for one key number.
+- Tone: direct and clear, like a knowledgeable colleague giving a quick briefing. Never vague.""",
 
         "Explain the numbers": """OUTPUT MODE: Explain the numbers — RULES:
 - Walk through the key numbers clearly, one at a time.
