@@ -16,43 +16,11 @@ This is an **early design skill** — most valuable when facade decisions are st
 
 ---
 
-## CEA4 Integration
+## File Source
 
-This skill runs as a CEA4 plugin.
+This skill reads from the uploaded CEA project zip. The app finds the relevant files automatically by filename — no manual file selection needed.
 
-**Location context** read automatically from project weather file:
-```python
-locator.get_weather()  # → city, latitude, longitude
-```
-
-**Building geometry** accessed via InputLocator:
-```python
-locator.get_zone_geometry()
-# → zone.shp — building footprints, heights, facade geometry
-# Used to assess facade regularity and surface continuity
-```
-
-**Envelope properties** accessed via InputLocator:
-```python
-locator.get_building_envelope_properties()
-# → building-properties/envelope.csv
-# wwr values per orientation — high WWR = fragmented opaque surfaces
-```
-
-**PV yield data** accessed via InputLocator:
-```python
-locator.get_pv_results(panel_type="PV1")
-# → PV_PV{n}_total_buildings.csv
-# area_PV_m2 per surface — low installed area relative to facade area signals fragmentation
-```
-
-**Internet search** for current best practice:
-- Minimum panel size for cost-effective BIPV integration
-- Facade BIPV integration details for different surface types
-- Cost premium for complex vs simple facade integration
-
----
-
+**Location context** is taken from the project's weather file (`.epw`) found inside the zip.
 ## Analysis Logic
 
 **Complexity indicators identified from CEA data:**
