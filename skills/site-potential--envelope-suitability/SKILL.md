@@ -22,41 +22,13 @@ Flips the question — calculates the maximum WWR the architect can apply to eac
 
 ---
 
-## CEA4 Integration
+## File Source
 
-This skill runs as a CEA4 plugin. All data is read automatically via the CEA4 `InputLocator`.
+This skill reads from the uploaded CEA project zip. The app finds the relevant files automatically by filename — no manual file selection needed.
 
-**Location context** read automatically from the project weather file:
-```python
-locator.get_weather()  # → .epw file containing city, latitude, longitude
-```
-
-**Building geometry** accessed via InputLocator:
-```python
-locator.get_zone_geometry()
-# → zone.shp — building footprints, heights, floor counts
-# Used to calculate: total facade area per orientation, roof area
-```
-
-**Envelope properties** accessed via InputLocator:
-```python
-locator.get_building_envelope_properties()
-# → building-properties/envelope.csv
-# Key columns: wwr_north, wwr_south, wwr_east, wwr_west
-# (window-to-wall ratio per orientation, per building)
-```
-
-**Mode detection:** The skill checks whether `wwr_*` values are defined in `envelope.csv`. If all values are at the CEA default (0.4) or flagged as undefined, it switches to Mode B automatically and informs the architect.
-
----
-
+**Location context** is taken from the project's weather file (`.epw`) found inside the zip.
 ## Data Sources
 
-**Primary CEA files accessed via InputLocator:**
-
-| File | What it provides |
-|------|-----------------|
-| `zone.shp` | Building footprint, height, number of floors → total facade and roof area |
 | `building-properties/envelope.csv` | Window-to-wall ratio per orientation per building (`wwr_north`, `wwr_south`, `wwr_east`, `wwr_west`) |
 
 **Key columns from `envelope.csv`:**
