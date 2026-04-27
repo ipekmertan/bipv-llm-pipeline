@@ -129,20 +129,33 @@ def chart_solar_irradiation(cea_data, selected_buildings, output_mode):
         ).properties(title="Annual irradiation by surface orientation", height=200)
         return chart
 
-    # Explain numbers / Design implication — per building stacked bars
+    # Explain numbers / Design implication
     n_buildings = df_b[name_col].nunique()
-    chart = alt.Chart(df_long).mark_bar().encode(
-        x=alt.X("building:N", title="", axis=alt.Axis(labelAngle=-30)),
-        y=alt.Y("kWh:Q", title="Annual irradiation (kWh/yr)"),
-        color=alt.Color("surface:N", scale=alt.Scale(
-            domain=surface_order, range=color_range),
-            legend=alt.Legend(title="Surface")),
-        order=alt.Order("surface:N"),
-        tooltip=["building", "surface", alt.Tooltip("kWh:Q", format=",.0f", title="kWh/yr")]
-    ).properties(
-        title="Annual irradiation by building and surface",
-        height=250
-    )
+
+    if n_buildings == 1:
+        # Single building — show each surface as its own bar
+        df_agg = df_long.groupby("surface")["kWh"].sum().reset_index()
+        df_agg = df_agg[df_agg["kWh"] > 0]
+        chart = alt.Chart(df_agg).mark_bar(cornerRadiusTopLeft=3,
+                                            cornerRadiusTopRight=3).encode(
+            x=alt.X("surface:N", sort=surface_order, title="Surface",
+                    axis=alt.Axis(labelAngle=0)),
+            y=alt.Y("kWh:Q", title="Annual irradiation (kWh/yr)"),
+            color=alt.Color("surface:N", scale=alt.Scale(
+                domain=surface_order, range=color_range), legend=None),
+            tooltip=["surface", alt.Tooltip("kWh:Q", format=",.0f", title="kWh/yr")]
+        ).properties(title="Annual irradiation by surface orientation", height=250)
+    else:
+        # Multiple buildings — stacked bars per building
+        chart = alt.Chart(df_long).mark_bar().encode(
+            x=alt.X("building:N", title="", axis=alt.Axis(labelAngle=-30)),
+            y=alt.Y("kWh:Q", title="Annual irradiation (kWh/yr)"),
+            color=alt.Color("surface:N", scale=alt.Scale(
+                domain=surface_order, range=color_range),
+                legend=alt.Legend(title="Surface")),
+            order=alt.Order("surface:N"),
+            tooltip=["building", "surface", alt.Tooltip("kWh:Q", format=",.0f", title="kWh/yr")]
+        ).properties(title="Annual irradiation by building and surface", height=250)
     return chart
 
 
