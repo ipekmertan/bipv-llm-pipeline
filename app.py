@@ -323,6 +323,11 @@ def build_data_summary(cea_data, selected_buildings=None, scale="District"):
 def call_llm(system_prompt, messages):
     import time
     api_key = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
+    # Use faster model for explain/design modes — higher Groq rate limit
+    if "Explain the numbers" in system_prompt or "Design implication" in system_prompt:
+        model = "llama-3.1-8b-instant"
+    else:
+        model = "llama-3.3-70b-versatile"
     max_retries = 3
     retry_delays = [10, 20, 30]  # seconds between retries
     for attempt in range(max_retries):
@@ -330,7 +335,7 @@ def call_llm(system_prompt, messages):
             resp = requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={"model": "llama-3.3-70b-versatile", "max_tokens": 1500,
+                json={"model": model, "max_tokens": 1500,
                       "messages": [{"role": "system", "content": system_prompt}] + messages},
                 timeout=60
             )
