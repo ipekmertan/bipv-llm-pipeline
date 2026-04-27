@@ -14,31 +14,13 @@ This skill reads CEA's seasonal irradiation output and compares radiation across
 
 ---
 
-## CEA4 Integration
+## File Source
 
-This skill runs as a CEA4 plugin. All data is read automatically via the CEA4 `InputLocator` — no manual file handling required.
+This skill reads from the uploaded CEA project zip. The app finds the relevant files automatically by filename — no manual file selection needed.
 
-**Location context** read automatically from the project weather file:
-```python
-locator.get_weather()  # → .epw file containing city, latitude, longitude
-```
-
-**Seasonal irradiation data** accessed via InputLocator:
-```python
-locator.get_solar_radiation_csv(period="seasonally")
-# → solar_irradiation_seasonally.csv (district)
-# → solar_irradiation_seasonally_buildings.csv (building/cluster)
-```
-
----
-
+**Location context** is taken from the project's weather file (`.epw`) found inside the zip.
 ## Data Sources
 
-**Primary CEA files accessed via InputLocator:**
-
-| Scale | File |
-|-------|------|
-| District | `solar_irradiation_seasonally.csv` |
 | Cluster | `solar_irradiation_seasonally_buildings.csv` (filtered to named buildings) |
 | Building | `solar_irradiation_seasonally_buildings.csv` (single building, 4 rows) |
 
