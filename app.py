@@ -1002,7 +1002,10 @@ else:
                 st.markdown(msg["content"])
                 st.markdown('</div><div class="clearfix"></div>', unsafe_allow_html=True)
                 # Render chart inline after first AI response only
-                if i == 1 and st.session_state.skill_id and st.session_state.cea_data:
+                if (i == 1
+                        and st.session_state.skill_id
+                        and st.session_state.cea_data
+                        and st.session_state.get("tree_mode") == "Explain the numbers"):
                     _scale = st.session_state.tree_scale
                     _sel = None
                     if _scale == "Building" and st.session_state.selected_building:
@@ -1015,7 +1018,7 @@ else:
                             st.session_state.skill_id,
                             st.session_state.cea_data,
                             _sel,
-                            st.session_state.tree_mode or "Key takeaway"
+                            "Explain the numbers"
                         )
                         if _chart is not None:
                             st.altair_chart(_chart, use_container_width=True)
