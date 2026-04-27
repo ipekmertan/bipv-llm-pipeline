@@ -25,33 +25,10 @@ This skill reads from the uploaded CEA project zip. The app finds the relevant f
 **Location context** is taken from the project's weather file (`.epw`) found inside the zip.
 ```
 
-**Lifecycle emissions data** accessed via InputLocator:
-```python
-locator.get_lifecycle_emissions()
-# → lifecycle_emissions_buildings.csv
-# PV embodied carbon: production_PV_PV1[kgCO2e]
-
-locator.get_total_emissions_building()
-# → Total_emission_building_2100.csv
-# Full lifetime emissions including PV production and offsets
-```
-
-**Operational emissions data** accessed via InputLocator:
-```python
-locator.get_operational_emissions()
-# → operational_emissions_annually_buildings.csv
-# Annual BIPV offset: PV_PV1_GRID_offset[kgCO2e] per year
-```
-
 ---
 
 ## Data Sources
 
-**Primary CEA files accessed via InputLocator:**
-
-| File | What it provides |
-|------|-----------------|
-| `lifecycle_emissions_buildings.csv` | Embodied carbon of PV panels per panel type (`production_PV_PV{n}[kgCO2e]`) |
 | `operational_emissions_annually_buildings.csv` | Annual carbon offset from BIPV (`PV_PV{n}_GRID_offset[kgCO2e]`) |
 | `Total_emission_building_2100.csv` | Full lifetime net carbon per building to 2100 |
 
