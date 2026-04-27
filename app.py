@@ -191,18 +191,33 @@ def summarize_dataframe(fname, df, selected_buildings=None):
     n_rows = df.shape[0]
     cols = ", ".join(df.columns)
 
-    # Solar irradiation files
+    # Solar irradiation files — extract ALL surface columns by orientation
     if "solar_irradiation" in fname:
-        rad_col = next((c for c in df.columns if "kWh" in c or "radiation" in c.lower() or "irr" in c.lower()), None)
-        if rad_col:
-            lines = [f"### {fname} ({n_rows} rows)"]
-            lines.append(f"Radiation column: {rad_col}")
-            lines.append(f"Total: {df[rad_col].sum():.0f} | Mean: {df[rad_col].mean():.0f} | "
-                        f"Max: {df[rad_col].max():.0f} | Min: {df[rad_col].min():.0f} kWh/m²/yr")
-            if "name" in df.columns:
-                top3 = df.nlargest(3, rad_col)[["name", rad_col]]
-                lines.append("Top 3 buildings: " + "; ".join(f"{r['name']}: {r[rad_col]:.0f}" for _, r in top3.iterrows()))
-            return "\n".join(lines)
+        lines = [f"### {fname} ({n_rows} rows)"]
+        surface_cols = {
+            "roof":       next((c for c in df.columns if "roof" in c.lower() and "window" not in c.lower()), None),
+            "wall_south": next((c for c in df.columns if "south" in c.lower() and "window" not in c.lower()), None),
+            "wall_east":  next((c for c in df.columns if "east" in c.lower() and "window" not in c.lower()), None),
+            "wall_west":  next((c for c in df.columns if "west" in c.lower() and "window" not in c.lower()), None),
+            "wall_north": next((c for c in df.columns if "north" in c.lower() and "window" not in c.lower()), None),
+        }
+        found = {k: v for k, v in surface_cols.items() if v is not None}
+        if found:
+            lines.append("Surface irradiation by orientation (kWh/yr, windows excluded):")
+            for surface, col in found.items():
+                lines.append(f"  {surface}: total={df[col].sum():.0f} kWh | mean={df[col].mean():.0f} kWh")
+            if "name" in df.columns and found:
+                first_col = list(found.values())[0]
+                top3 = df.nlargest(3, first_col)[["name"] + list(found.values())]
+                lines.append("Top 3 buildings:")
+                for _, r in top3.iterrows():
+                    vals = " | ".join(f"{s}={r[c]:.0f}" for s, c in found.items())
+                    lines.append(f"  {r['name']}: {vals}")
+        else:
+            rad_col = next((c for c in df.columns if "kWh" in c or "irr" in c.lower()), None)
+            if rad_col:
+                lines.append(f"Total: {df[rad_col].sum():.0f} | Mean: {df[rad_col].mean():.0f} kWh")
+        return "\n".join(lines)
 
     # PV yield files
     if fname.startswith("PV_") and "_total" in fname:
@@ -336,8 +351,37 @@ def build_system_prompt(skill_md, cea_summary, output_mode, scale, selected_buil
     building_context = ""
     if selected_buildings:
         building_context = f"\nFocus your analysis specifically on: {', '.join(selected_buildings)}."
+
+    mode_instructions = {
+        "Key takeaway": """OUTPUT MODE: Key takeaway — STRICT RULES:
+- Maximum 3 sentences. No exceptions.
+- One headline finding with a specific number.
+- One sentence of context or comparison.
+- One sentence of design implication.
+- DO NOT show calculations, bullet lists, intermediate steps, or methodology.
+- DO NOT explain how you arrived at the number — just state it.""",
+
+        "Explain the numbers": """OUTPUT MODE: Explain the numbers — RULES:
+- Walk through the key numbers clearly, one at a time.
+- You may use bullet points with values and brief explanations.
+- Keep each point to 1-2 sentences maximum.
+- Do not exceed 200 words total.
+- No hypothetical assumptions — only use actual data provided.""",
+
+        "Design implication": """OUTPUT MODE: Design implication — RULES:
+- Skip the numbers entirely unless one is essential to make a point.
+- Focus only on what this means for the architect's design decisions.
+- Maximum 4 sentences.
+- Frame every sentence as an actionable insight or trade-off.
+- DO NOT show calculations or methodology."""
+    }
+
+    mode_block = mode_instructions.get(output_mode, f"Output mode: {output_mode}")
+
     return f"""You are a BIPV expert helping architects interpret CEA4 simulation results.
-Output mode: {output_mode} | Scale: {scale}{building_context}
+Scale: {scale}{building_context}
+
+{mode_block}
 
 ## Skill specification
 {skill_md}
@@ -345,7 +389,9 @@ Output mode: {output_mode} | Scale: {scale}{building_context}
 ## CEA data
 {cea_summary}
 
-Follow the skill spec for the chosen output mode and scale. Use actual numbers from the data. Plain language for a design presentation. If a file is missing, say which CEA simulation needs to be run."""
+Use actual numbers from the data where available. If a specific value is missing, note it briefly in one sentence, then proceed using industry-standard defaults clearly labelled as estimates — e.g. grid emissions ~0.4 kgCO₂/kWh for Central Europe, panel cost ~250 €/m², system lifetime 25 years, performance ratio 0.75.
+Do NOT describe, mention, or suggest visualizations or charts — these are generated automatically by the app.
+Do NOT use markdown symbols like ** or * for formatting. Plain prose only."""
 
 
 def render_parameter_check(threshold_result, skill_id):
@@ -900,8 +946,30 @@ else:
                 st.markdown(f'<div class="bubble-user">{msg["content"]}</div><div class="clearfix"></div>',
                            unsafe_allow_html=True)
             else:
-                st.markdown(f'<div class="bubble-ai">{msg["content"]}</div><div class="clearfix"></div>',
-                           unsafe_allow_html=True)
+                # Render as markdown so formatting works, then inject chart
+                st.markdown('<div class="bubble-ai">', unsafe_allow_html=True)
+                st.markdown(msg["content"])
+                st.markdown('</div><div class="clearfix"></div>', unsafe_allow_html=True)
+                # Render chart inline after first AI response only
+                if i == 1 and st.session_state.skill_id and st.session_state.cea_data:
+                    _scale = st.session_state.tree_scale
+                    _sel = None
+                    if _scale == "Building" and st.session_state.selected_building:
+                        _sel = [st.session_state.selected_building]
+                    elif _scale == "Cluster" and st.session_state.selected_cluster:
+                        _sel = st.session_state.selected_cluster
+                    try:
+                        from charts import render_skill_chart
+                        _chart = render_skill_chart(
+                            st.session_state.skill_id,
+                            st.session_state.cea_data,
+                            _sel,
+                            st.session_state.tree_mode or "Key takeaway"
+                        )
+                        if _chart is not None:
+                            st.altair_chart(_chart, use_container_width=True)
+                    except Exception:
+                        pass
 
         if st.session_state.chat_history:
             st.markdown("---")
