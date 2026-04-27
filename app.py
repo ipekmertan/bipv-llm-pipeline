@@ -368,11 +368,12 @@ def build_system_prompt(skill_md, cea_summary, output_mode, scale, selected_buil
     mode_instructions = {
         "Key takeaway": """OUTPUT MODE: Key takeaway — STRICT RULES:
 - Maximum 3 sentences. No exceptions.
-- One headline finding with a specific number.
-- One sentence of context or comparison.
-- One sentence of design implication.
-- DO NOT show calculations, bullet lists, intermediate steps, or methodology.
-- DO NOT explain how you arrived at the number — just state it.""",
+- Sentence 1 — Lead with the best-performing surface or result: name it, give the specific number, and say why it matters. Start with the surface/finding, not the building name. Example: "The roof of B1000 receives 1,613,514 kWh/yr — well above the viability threshold."
+- Sentence 2 — One comparison or context sentence that helps the architect understand the scale or ranking.
+- Sentence 3 — One concrete, specific design action the architect should take. Include actual numbers where possible (area, percentage, kWh target). Never say "maximise" without saying what to maximise to. Example: "Prioritise full roof coverage (~500 m²) before considering facade surfaces."
+- DO NOT use numbered lists or labels like "1." "2." "Headline:" "Context:" — just write the sentences directly.
+- DO NOT be vague — every sentence must contain a specific number or named surface.
+- You MAY use **bold** for the key number or surface name to aid readability.""",
 
         "Explain the numbers": """OUTPUT MODE: Explain the numbers — RULES:
 - Walk through the key numbers clearly, one at a time.
@@ -404,7 +405,7 @@ Scale: {scale}{building_context}
 
 Use actual numbers from the data where available. If a specific value is missing, note it briefly in one sentence, then proceed using industry-standard defaults clearly labelled as estimates — e.g. grid emissions ~0.4 kgCO₂/kWh for Central Europe, panel cost ~250 €/m², system lifetime 25 years, performance ratio 0.75.
 Do NOT describe, mention, or suggest visualizations or charts — these are generated automatically by the app.
-Do NOT use markdown symbols like ** or * for formatting. Plain prose only."""
+Do NOT use markdown headers (#), bullet points (-), or numbered lists. You MAY use **bold** sparingly for key numbers and surface names."""
 
     # Cap total prompt size to avoid 413 errors
     max_total = 6000
@@ -421,7 +422,7 @@ Scale: {scale}{building_context}
 
 Use actual numbers from the data where available. If a specific value is missing, note it briefly in one sentence, then proceed using industry-standard defaults clearly labelled as estimates — e.g. grid emissions ~0.4 kgCO₂/kWh for Central Europe, panel cost ~250 €/m², system lifetime 25 years, performance ratio 0.75.
 Do NOT describe, mention, or suggest visualizations or charts — these are generated automatically by the app.
-Do NOT use markdown symbols like ** or * for formatting. Plain prose only."""
+Do NOT use markdown headers (#), bullet points (-), or numbered lists. You MAY use **bold** sparingly for key numbers and surface names."""
     return prompt
 
 
