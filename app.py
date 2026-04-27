@@ -596,7 +596,7 @@ for k, v in [("cea_data", None), ("chat_history", []),
               ("param_check_hidden", False),
               ("selected_building", None), ("selected_cluster", []),
               ("reasoning_open", False), ("reasoning_threshold", False),
-              ("cached_system_prompt", None)]:   # FIX 2: cache slot
+              ("cached_system_prompt", None), ("tree_subsubsub", None)]:   # FIX 2: cache slot
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -706,6 +706,7 @@ else:
                     if st.button(topic, key=f"sub_{topic}"):
                         st.session_state.tree_sub = topic
                         st.session_state.tree_subsub = None
+                        st.session_state.tree_subsubsub = None
                         st.session_state.tree_mode = None
                         st.session_state.analysis_ran = False
                         st.session_state.cached_system_prompt = None
@@ -714,7 +715,7 @@ else:
                             st.session_state.skill_name = topic
                         st.rerun()
 
-        # Step 4: Analysis (if subtopics exist)
+        # Step 4: Analysis (depth-3 children)
         if st.session_state.tree_sub:
             node = TREE[st.session_state.tree_goal][st.session_state.tree_sub]
             if node["children"]:
@@ -726,11 +727,34 @@ else:
                     for child, child_node in node["children"].items():
                         if st.button(child, key=f"subsub_{child}"):
                             st.session_state.tree_subsub = child
+                            st.session_state.tree_subsubsub = None
                             st.session_state.tree_mode = None
                             st.session_state.analysis_ran = False
                             st.session_state.cached_system_prompt = None
-                            st.session_state.skill_id = child_node["id"]
-                            st.session_state.skill_name = child
+                            if not child_node["children"]:
+                                # leaf — set skill directly
+                                st.session_state.skill_id = child_node["id"]
+                                st.session_state.skill_name = child
+                            st.rerun()
+
+        # Step 4b: Sub-analysis (depth-4 children, e.g. Temporal Availability → Seasonal/Daily)
+        if st.session_state.tree_subsub:
+            node = TREE[st.session_state.tree_goal][st.session_state.tree_sub]
+            child_node = node["children"].get(st.session_state.tree_subsub, {})
+            if child_node.get("children"):
+                st.markdown("")
+                if st.session_state.tree_subsubsub:
+                    st.markdown(f"**Sub-analysis** · *{st.session_state.tree_subsubsub}*")
+                else:
+                    st.markdown("**Step 4b — Sub-analysis**")
+                    for grandchild, grandchild_node in child_node["children"].items():
+                        if st.button(grandchild, key=f"subsubsub_{grandchild}"):
+                            st.session_state.tree_subsubsub = grandchild
+                            st.session_state.tree_mode = None
+                            st.session_state.analysis_ran = False
+                            st.session_state.cached_system_prompt = None
+                            st.session_state.skill_id = grandchild_node["id"]
+                            st.session_state.skill_name = grandchild
                             st.rerun()
 
         # Step 5: Output mode
@@ -738,6 +762,13 @@ else:
             not TREE.get(st.session_state.tree_goal, {}).get(
                 st.session_state.tree_sub or "", {}).get("children") or
             st.session_state.tree_subsub
+        ) and (
+            not (
+                st.session_state.tree_subsub and
+                TREE.get(st.session_state.tree_goal, {}).get(
+                    st.session_state.tree_sub or "", {}).get("children", {}).get(
+                    st.session_state.tree_subsub or "", {}).get("children")
+            ) or st.session_state.tree_subsubsub
         )
         if skill_ready:
             st.markdown("")
@@ -777,8 +808,13 @@ else:
                 if st.session_state.tree_mode:
                     st.session_state.tree_mode = None
                     st.session_state.analysis_ran = False
+                elif st.session_state.tree_subsubsub:
+                    st.session_state.tree_subsubsub = None
+                    st.session_state.skill_id = None
+                    st.session_state.skill_name = None
                 elif st.session_state.tree_subsub:
                     st.session_state.tree_subsub = None
+                    st.session_state.tree_subsubsub = None
                     st.session_state.skill_id = None
                     st.session_state.skill_name = None
                 elif st.session_state.tree_sub:
@@ -796,7 +832,7 @@ else:
                 st.rerun()
         with col_b:
             if st.button("↺ Start over"):
-                for k in ["tree_scale","tree_goal","tree_sub","tree_subsub",
+                for k in ["tree_scale","tree_goal","tree_sub","tree_subsub","tree_subsubsub",
                           "tree_mode","skill_id","skill_name","analysis_ran",
                           "selected_building","selected_cluster","cached_system_prompt"]:
                     st.session_state[k] = None if k != "selected_cluster" else []
@@ -804,7 +840,7 @@ else:
                 st.rerun()
         with col_c:
             if st.button("↩ New project"):
-                for k in ["cea_data","tree_scale","tree_goal","tree_sub","tree_subsub",
+                for k in ["cea_data","tree_scale","tree_goal","tree_sub","tree_subsub","tree_subsubsub",
                           "tree_mode","skill_id","skill_name","analysis_ran",
                           "threshold_result","param_check_hidden",
                           "selected_building","selected_cluster","cached_system_prompt"]:
