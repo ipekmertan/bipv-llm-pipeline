@@ -69,6 +69,144 @@ def _monthly_from_hourly(df, col):
 
 # ── Chart builders ────────────────────────────────────────────────────────────
 
+def _height_col(df):
+    return _find_col(df, "height_ag", "height", "floors_ag", "floors")
+
+def _height_series(df, col):
+    if col is None or col not in df.columns:
+        return pd.Series([1] * len(df), index=df.index)
+    values = pd.to_numeric(df[col], errors="coerce").fillna(1)
+    if "floor" in col.lower():
+        values = values * 3.2
+    return values
+
+def _bbox_gap(a, b):
+    dx = max(float(a["minx"]) - float(b["maxx"]), float(b["minx"]) - float(a["maxx"]), 0)
+    dy = max(float(a["miny"]) - float(b["maxy"]), float(b["miny"]) - float(a["maxy"]), 0)
+    return (dx ** 2 + dy ** 2) ** 0.5
+
+def _direction_from_to(source, target):
+    dx = float(target["centroid_x"]) - float(source["centroid_x"])
+    dy = float(target["centroid_y"]) - float(source["centroid_y"])
+    if abs(dx) > abs(dy):
+        return "east" if dx > 0 else "west"
+    return "north" if dy > 0 else "south"
+
+def chart_massing_shading(cea_data, selected_buildings, output_mode):
+    """
+    Massing & shading strategy — site context chart using project and surroundings geometry.
+    Shows building positions and heights, with obstruction links when a building is selected.
+    """
+    zone = cea_data["files"].get("zone_geometry.csv")
+    surroundings = cea_data["files"].get("surroundings_geometry.csv")
+    required = ["centroid_x", "centroid_y", "minx", "miny", "maxx", "maxy"]
+    if zone is None or surroundings is None:
+        return chart_solar_irradiation(cea_data, selected_buildings, output_mode)
+    if any(c not in zone.columns for c in required) or any(c not in surroundings.columns for c in required):
+        return chart_solar_irradiation(cea_data, selected_buildings, output_mode)
+
+    zone = zone.copy()
+    surroundings = surroundings.copy()
+    name_col = _find_col(zone, "name", "Name", "building")
+    s_name_col = _find_col(surroundings, "name", "Name", "building")
+    h_col = _height_col(zone)
+    s_h_col = _height_col(surroundings)
+
+    zone["height_m"] = _height_series(zone, h_col)
+    surroundings["height_m"] = _height_series(surroundings, s_h_col)
+    zone["type"] = "Project building"
+    surroundings["type"] = "Surrounding building"
+    zone["label"] = zone[name_col].astype(str) if name_col else "Project"
+    surroundings["label"] = surroundings[s_name_col].astype(str) if s_name_col else "Surrounding"
+
+    if selected_buildings and name_col:
+        zone["focus"] = zone[name_col].isin(selected_buildings)
+    else:
+        zone["focus"] = True
+    surroundings["focus"] = False
+
+    plot_df = pd.concat([
+        zone[["centroid_x", "centroid_y", "height_m", "type", "label", "focus"]],
+        surroundings[["centroid_x", "centroid_y", "height_m", "type", "label", "focus"]],
+    ], ignore_index=True)
+
+    focus_zone = zone[zone["focus"]]
+    links = []
+    if not focus_zone.empty:
+        for _, building in focus_zone.iterrows():
+            bheight = float(building["height_m"]) if building["height_m"] == building["height_m"] else 0
+            candidates = []
+            for _, neighbour in surroundings.iterrows():
+                nheight = float(neighbour["height_m"]) if neighbour["height_m"] == neighbour["height_m"] else 0
+                distance = _bbox_gap(building, neighbour)
+                critical_distance = max(nheight * 2, 1)
+                if distance <= critical_distance or nheight > bheight:
+                    candidates.append({
+                        "target": str(building["label"]),
+                        "source": str(neighbour["label"]),
+                        "x1": float(building["centroid_x"]),
+                        "y1": float(building["centroid_y"]),
+                        "x2": float(neighbour["centroid_x"]),
+                        "y2": float(neighbour["centroid_y"]),
+                        "distance_m": distance,
+                        "height_m": nheight,
+                        "direction": _direction_from_to(building, neighbour),
+                    })
+            links.extend(sorted(candidates, key=lambda item: item["distance_m"])[:5])
+
+    base = alt.Chart(plot_df).mark_circle(opacity=0.82, stroke="#ffffff", strokeWidth=0.8).encode(
+        x=alt.X("centroid_x:Q", title="Site x-coordinate", axis=alt.Axis(labels=False, ticks=False)),
+        y=alt.Y("centroid_y:Q", title="Site y-coordinate", axis=alt.Axis(labels=False, ticks=False)),
+        size=alt.Size("height_m:Q", title="Height (m)", scale=alt.Scale(range=[60, 900])),
+        color=alt.Color("type:N", scale=alt.Scale(
+            domain=["Project building", "Surrounding building"],
+            range=[C_PV, C_NEUTRAL]
+        ), legend=alt.Legend(title="Massing")),
+        strokeDash=alt.condition("datum.focus", alt.value([1, 0]), alt.value([2, 2])),
+        tooltip=[
+            alt.Tooltip("label:N", title="Building"),
+            alt.Tooltip("type:N", title="Type"),
+            alt.Tooltip("height_m:Q", title="Height (m)", format=".1f"),
+        ]
+    )
+
+    labels = alt.Chart(plot_df[plot_df["type"] == "Project building"]).mark_text(
+        dy=-12, fontSize=10, color=C_DEMAND
+    ).encode(
+        x="centroid_x:Q",
+        y="centroid_y:Q",
+        text="label:N"
+    )
+
+    chart = base + labels
+    if links:
+        link_df = pd.DataFrame(links)
+        segments = pd.concat([
+            link_df.assign(x=link_df["x1"], y=link_df["y1"], order=0),
+            link_df.assign(x=link_df["x2"], y=link_df["y2"], order=1),
+        ])
+        link_chart = alt.Chart(segments).mark_line(
+            color=C_CARBON, opacity=0.55, strokeDash=[4, 3]
+        ).encode(
+            x="x:Q",
+            y="y:Q",
+            detail="source:N",
+            order="order:Q",
+            tooltip=[
+                alt.Tooltip("source:N", title="Potential obstruction"),
+                alt.Tooltip("target:N", title="Target"),
+                alt.Tooltip("direction:N", title="Direction"),
+                alt.Tooltip("distance_m:Q", title="Gap (m)", format=".1f"),
+                alt.Tooltip("height_m:Q", title="Obstruction height (m)", format=".1f"),
+            ]
+        )
+        chart = link_chart + chart
+
+    return chart.properties(
+        title="Massing context: surrounding height and obstruction proximity",
+        height=360
+    ).configure_view(strokeWidth=0)
+
 def chart_solar_irradiation(cea_data, selected_buildings, output_mode):
     """
     Solar irradiation skills.
@@ -687,7 +825,7 @@ SKILL_CHART_MAP = {
     "site-potential--solar-availability--temporal-availability--seasonal-patterns": chart_seasonal_patterns,
     "site-potential--solar-availability--temporal-availability--daily-patterns":    chart_daily_patterns,
     "site-potential--envelope-suitability":                                 chart_solar_irradiation,
-    "site-potential--massing-and-shading-strategy":                         chart_solar_irradiation,
+    "site-potential--massing-and-shading-strategy":                         chart_massing_shading,
     # Energy generation
     "performance-estimation--energy-generation":                            chart_energy_generation,
     "optimize-my-design--panel-type-tradeoff":                              chart_energy_generation,
