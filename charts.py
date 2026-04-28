@@ -503,14 +503,14 @@ def chart_economic(cea_data, selected_buildings, output_mode):
             "Item": ["Total investment", "Annual savings (10yr)", "Annual savings (25yr)"],
             "€": [total_cost, annual_savings * 10, annual_savings * 25],
         })
+        df_sum["bar_color"] = df_sum["Item"].apply(
+            lambda item: C_CARBON if item == "Total investment" else C_SURPLUS
+        )
         bar = alt.Chart(df_sum).mark_bar(cornerRadiusTopLeft=3,
                                           cornerRadiusTopRight=3).encode(
             x=alt.X("Item:N", title=""),
             y=alt.Y("€:Q", title="€"),
-            color=alt.condition(
-                alt.datum["Item"] == "Total investment",
-                alt.value(C_CARBON), alt.value(C_SURPLUS)
-            ),
+            color=alt.Color("bar_color:N", scale=None, legend=None),
             tooltip=["Item", alt.Tooltip("€:Q", format=",.0f")]
         ).properties(title=f"Economic summary — est. payback {payback_yr:.1f} yr",
                      height=200)
@@ -521,7 +521,7 @@ def chart_economic(cea_data, selected_buildings, output_mode):
         x=alt.X("Year:Q", title="Years"),
         y=alt.Y("Cumulative cashflow (€):Q", title="€"),
         color=alt.condition(
-            alt.datum["Cumulative cashflow (€)"] >= 0,
+            alt.datum.positive,
             alt.value(C_SURPLUS), alt.value(C_CARBON)
         ),
         tooltip=["Year", alt.Tooltip("Cumulative cashflow (€):Q", format=",.0f")]
