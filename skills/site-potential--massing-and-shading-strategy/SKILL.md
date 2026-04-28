@@ -87,7 +87,7 @@ Possible massing moves:
 - increase setback from tall south/east/west neighbours
 - shift height or dense program volume northward
 - elongate the mass east-west to create a stronger south-facing BIPV plane
-- split one bulky volume into thinner bars to reduce self-shading
+- split one bulky volume into thinner bars to reduce project-to-project obstruction or over-deep massing
 - lower or terrace upper floors where they shade useful roof/facade areas
 - keep service cores or low-PV program on weakly irradiated sides
 - reserve the strongest roof plane as the baseline solar collector
@@ -97,7 +97,7 @@ Possible massing moves:
 - atrium massing: use a larger internal void when solar/daylight and program organisation benefit
 - stilted or lifted massing: lift part of the volume to improve porosity, daylight, or shadow relationships
 - solar-envelope massing: shape the volume around solar access constraints
-- split-bar massing: divide a bulky block into thinner bars to reduce self-shading
+- split-bar massing: divide a bulky block into thinner bars to reduce project-to-project obstruction and expose more useful roof/facade area
 
 Do not give generic urban-design advice. Every recommendation must connect to a specific computed obstruction, surface, or irradiation result.
 
@@ -133,7 +133,10 @@ Do not give generic urban-design advice. Every recommendation must connect to a 
 - Do not list every surrounding building unless it changes the design recommendation.
 - Do not describe charts.
 - Do not promise exact recovered kWh from a massing move unless a rerun simulation exists.
-- Do not present obstruction risk scores as exact simulated shading losses. They are geometry-screening indicators.
+- Do not mention internal obstruction risk scores. Use plain risk levels such as low, moderate, high, or very high.
+- Do not label the selected building as its own surrounding obstruction. If the same building name appears in `zone` and `surroundings`, ignore the duplicate as an obstruction source.
+- Self-shading can be discussed only as a general massing risk from bulky/deep form; do not attribute it to a named building unless a real self-shading calculation exists.
+- Use "project-to-project obstruction" when another project building is the source.
 - Do not invent trees, terraces, heritage constraints, or client goals.
 
 ---
