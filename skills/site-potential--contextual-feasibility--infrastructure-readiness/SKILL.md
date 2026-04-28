@@ -1,149 +1,151 @@
 ---
 name: site-potential--contextual-feasibility--infrastructure-readiness
-description: Use when the architect wants to understand how the local grid infrastructure supports BIPV integration in their project location. Uses location from CEA weather file and internet search to retrieve current grid readiness information for that city and country.
-intent: Give the architect a clear picture of the infrastructure context before committing to BIPV — covering grid capacity, feed-in tariff availability, net metering policies, and connection requirements for the project location.
+description: "Use when the architect needs to understand whether BIPV fits the site's electricity and thermal infrastructure, and how grid/export constraints should shape design strategy."
+intent: "Connect building-scale BIPV decisions to urban energy systems: grid export pressure, demand matching, transformer screening, supply-system compatibility, district heating/cooling context, and self-consumption strategy."
 type: component
-position_in_tree: "Goal → Site Potential → Contextual Feasibility → Infrastructure Readiness"
+position_in_tree: "Goal -> Site Potential -> Contextual Feasibility -> Infrastructure Readiness"
 ---
 
 ## Purpose
 
-Answer the question: **"How prepared is the local grid infrastructure to support BIPV in this location?"**
+Answer the question: **"Is the surrounding infrastructure ready for this BIPV strategy, and how should that affect the design?"**
 
-This skill uses the project location (read automatically from the CEA weather file) to search for current information about the local electricity grid's readiness to accept BIPV-generated power. It covers grid capacity, feed-in policies, net metering availability, and connection requirements.
+This skill connects BIPV design decisions to infrastructure systems. It is **internet-required and CEA-supported**.
 
-This is a **pre-design** skill — it gives the architect the infrastructure context they need before committing to a BIPV strategy, not after running simulations.
+CEA can describe the project's pressure on infrastructure. It cannot, by itself, prove local grid readiness. Full readiness depends on local utility and policy data.
 
----
+The skill should explain whether the design is likely to depend on:
 
-## CEA4 Integration
+- grid export capacity
+- self-consumption
+- load shifting or storage
+- building electricity demand
+- heating/cooling system type
+- district heating or district cooling context
+- grid carbon assumptions
 
-This skill runs as a CEA4 plugin.
-
-**Location context** read automatically from the project weather file:
-```python
-locator.get_weather()
-# → .epw file → extracts city, country, latitude, longitude
-# This location is passed directly to the internet search
-```
-
-**No CEA simulation data is used by this skill.** All information comes from internet search based on the project location.
+This is an urban-systems translation node for architects.
 
 ---
 
-## Data Sources
+## Data Used
 
-**Primary source: Internet search**
+Primary CEA data:
 
-The LLM performs targeted searches for the project location using the following queries:
-- `"[city] BIPV grid connection requirements [current year]"`
-- `"[country] net metering solar feed-in tariff policy [current year]"`
-- `"[city] electricity grid capacity renewable energy [current year]"`
-- `"[country] BIPV building integrated photovoltaics regulations [current year]"`
+- `PV_PV*_total.csv`
+- `PV_PV*_total_buildings.csv`
+- `Total_demand_hourly.csv`
+- individual building demand files, when building or cluster scale is selected
+- `GRID.csv`
+- `supply.csv`
+- `SUPPLY_HEATING.csv`
+- `SUPPLY_HOTWATER.csv`
+- `SUPPLY_ELECTRICITY.csv`
+- `SUPPLY_COOLING.csv`
+- thermal-network output file presence, if available
 
-**Key information retrieved:**
-- Whether net metering or feed-in tariffs are available
-- Grid connection process and typical timeline
-- Any capacity limits on distributed solar generation
-- Whether the local utility actively supports or restricts small-scale solar
-- Current grid carbon intensity (relevant for carbon impact analysis)
+External utility data required for a complete answer:
 
-**Source quality:** The LLM prioritises government energy agency websites, national grid operator publications, and reputable energy research organisations. It flags when information may be outdated and provides the source and date of each piece of information.
+- live net metering or feed-in tariff status
+- export limits and grid connection thresholds
+- transformer / hosting capacity if published
+- connection application process and timeline
+- current local utility or government rules
 
----
-
-## Scale Behaviour
-
-Infrastructure readiness is a **location-level** analysis — it applies equally to district, cluster, and building scale since it reflects the policy and grid context of the city/country, not individual buildings.
-
-The scale selection affects only the framing:
-
-**District scale:**
-- Framing: "For a district-scale BIPV installation in [city], the key infrastructure considerations are..."
-- Highlights capacity limits that may apply to large aggregated systems
-
-**Cluster scale:**
-- Framing: "For a cluster of buildings in [city], the connection and metering arrangements would typically involve..."
-
-**Building scale:**
-- Framing: "For a single building BIPV installation in [city], the process would typically be..."
-- Highlights individual building connection requirements
+If these facts are not supplied by a search/tool module, do not invent them. Give a provisional answer based on CEA project pressure only.
 
 ---
 
-## Benchmark
+## What Python Should Calculate
 
-**Infrastructure readiness indicators:**
+Before calling the LLM, calculate a compact infrastructure summary:
 
-| Indicator | Strong | Moderate | Weak |
-|-----------|--------|----------|------|
-| Net metering | Available, no cap | Available, with cap | Not available |
-| Feed-in tariff | Active, competitive rate | Available, low rate | Not available |
-| Grid capacity | No restrictions | Local restrictions | Widespread curtailment |
-| Connection process | Streamlined, < 3 months | Standard, 3–6 months | Complex, > 6 months |
+- peak PV generation in kW
+- annual PV generation in kWh/year
+- peak electricity demand in kW
+- annual electricity demand in kWh/year
+- PV peak as a percentage of peak demand
+- PV annual generation as a percentage of annual demand
+- transformer screening using an explicitly labelled indicative transformer assumption if actual transformer data is missing
+- grid carbon factor from `GRID.csv`
+- grid buy/sell price assumptions from `GRID.csv`
+- heating, hot water, cooling, and electricity supply-system descriptions
+- whether district heating/cooling network outputs exist
+- infrastructure readiness class:
+  - STRONG: PV peak is small relative to demand and indicative transformer capacity
+  - MODERATE: BIPV is feasible but export/self-consumption strategy matters
+  - CONSTRAINED: peak generation could create export pressure without self-consumption, storage, or utility coordination
+  - UNKNOWN: not enough data
 
-The LLM maps retrieved information onto these indicators and gives an overall readiness rating for the location.
+This class is only a **project-side pressure class** unless external utility data is also available.
 
----
-
-## Output Modes
-
-### If "Explain the numbers" selected:
-**What the LLM produces:**
-- Current net metering and feed-in tariff status for the location
-- Grid connection process overview and typical timeline
-- Any capacity restrictions or curtailment risks
-- Current grid carbon intensity (kgCO2/kWh) — relevant for carbon impact analysis
-- Source and date for each piece of information
-
-**Visualization:** Infrastructure readiness scorecard
-- Four indicators shown as a simple traffic light grid
-- Green / Amber / Red per indicator
-- Source links listed below
+Do not ask the LLM to infer these from raw CSV rows.
 
 ---
 
-### If "Key takeaway" selected:
-**What the LLM produces:**
-- One headline: overall infrastructure readiness rating for the location
-- Two or three key facts the architect needs to know before proceeding
-- Any critical blockers or strong enablers
+## LLM Role
 
-**Visualization:** Summary card
-- Overall rating (Strong / Moderate / Weak)
-- Three bullet points of key facts
-- Designed to be shared with a client or included in a feasibility report
+Interpret the computed infrastructure summary for an architect.
 
----
+The LLM should:
 
-### If "Design implication" selected:
-**What the LLM produces:**
-- Concrete recommendation on how infrastructure context should shape the BIPV strategy
-- If net metering is available: recommend sizing for self-consumption + export
-- If no feed-in tariff: recommend sizing purely for self-consumption to maximise financial return
-- If grid capacity is constrained: recommend battery storage consideration
-- If connection process is long: flag timeline implications for project delivery
-- Links to Basic Economic Signal skill for financial context
+- start with infrastructure readiness: STRONG, MODERATE, CONSTRAINED, or UNKNOWN
+- state whether the rating is complete or provisional
+- explain whether the main issue is grid export, demand matching, or thermal-system compatibility
+- say whether BIPV should be sized for self-consumption or maximum export
+- explain whether BIPV electricity offsets the relevant building loads
+- connect thermal-system type to the carbon narrative
+- identify what information needs external verification
 
-**Visualization:** Strategy recommendation card
-- Three scenario options based on infrastructure context
-- Each option with a brief rationale
-- Designed to support early client conversation
+Important:
+
+- If heating is boiler-based or district-heating-based, BIPV electricity does not directly offset heating carbon unless electric heating or heat pumps are in the system definition.
+- If heat pumps, electric cooling, or electric domestic hot water are present, BIPV can be framed as supporting those electrical loads.
+- If PV peak is high relative to demand or indicative transformer capacity, recommend self-consumption, load shifting, battery/thermal storage, or smaller/more distributed BIPV area before assuming export.
+- Do not claim live utility approval status.
+- Do not claim current tariff policy unless a search module provides a sourced result.
+- If no internet/search result is present, say that CEA shows project-side pressure but not full local infrastructure readiness.
 
 ---
 
-## Common Pitfalls
+## Output Expectations
 
-- **Policies change frequently:** Grid policies and feed-in tariffs change often — always display the date of retrieved information and encourage the architect to verify with local authorities before making financial commitments.
-- **City vs national policy:** In some countries (e.g. China, USA), grid policy varies significantly by city or province. Always search at city level first, then national level, and flag any discrepancy.
-- **Language barrier:** In non-English-speaking countries, the most authoritative sources may be in the local language. The LLM notes when translation was involved and flags lower confidence accordingly.
-- **This is not legal or financial advice:** Always include a note that this information is for early feasibility orientation only and should be verified with a local energy consultant or utility before project commitment.
+**Key takeaway**
+- Start with the readiness rating and whether it is provisional.
+- State the main infrastructure constraint or enabler.
+- Give one design implication: self-consumption-first, export-ready, storage/load-shifting needed, or thermal-system mismatch.
+
+**Explain the numbers**
+- Explain peak PV, peak demand, annual PV/demand ratio, and transformer screening.
+- Explain grid carbon/buy/sell assumptions if available.
+- Explain supply-system compatibility: what BIPV electricity can and cannot offset.
+- Say clearly which infrastructure facts are CEA-derived and which would need utility verification.
+
+**Design implication**
+- Give a practical design strategy.
+- If export pressure is likely, orient the design around building loads rather than maximum generation.
+- If thermal systems are not electric, do not oversell BIPV as solving heating carbon.
+- If electric loads are present, suggest aligning PV surfaces/timing with those loads.
+- Mention external utility checks only as next-step verification, not as already-known facts.
 
 ---
 
-## References
+## Redundancy Rules
 
-- CEA4 weather file location extraction
-- Interview — Interviewee B: "Scenario suggestions based on context — climate, policy, etc." as desired AI capability
-- Interview — Interviewee D: used grid carbon intensity and policy context in scenario analysis
-- IDP 2024 Team 8: noted that Shanghai electricity prices made PV economics challenging — grid policy context was critical to their analysis
+- Do not repeat generic policy caveats in every bullet.
+- Do not describe charts.
+- Do not say "grid readiness depends on local policy" unless you also state what the CEA data already shows.
+- Do not turn this into an economics answer; keep the focus on infrastructure compatibility.
+
+---
+
+## Example Logic
+
+If peak PV is high relative to demand:
+- "Infrastructure Readiness: MODERATE. The BIPV system is feasible, but peak generation is large relative to building demand, so the design should prioritise self-consumed generation, load shifting, or staged PV area before assuming unrestricted export."
+
+If heating is gas boiler or district heating:
+- "BIPV electricity does not directly offset heating in the current system definition. Use BIPV for electric loads and be careful with the carbon narrative unless the design adds heat pumps or electric heating."
+
+If district heating outputs are present:
+- "The site appears connected to a thermal-network context. BIPV can reduce electrical demand, but heating decarbonisation depends on the district heating supply mix, not PV generation alone."
