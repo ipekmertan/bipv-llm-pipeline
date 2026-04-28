@@ -38,6 +38,20 @@ def _find_col(df, *keywords):
             return match
     return None
 
+def _season_col(df):
+    """Return the real season label column, avoiding period_hour metadata."""
+    if df is None:
+        return None
+    for exact in ["period", "season", "Season", "Period"]:
+        if exact in df.columns:
+            return exact
+    return next(
+        (c for c in df.columns
+         if ("season" in c.lower() or "period" in c.lower())
+         and "hour" not in c.lower()),
+        None
+    )
+
 def _monthly_from_hourly(df, col):
     """Aggregate an hourly dataframe column to monthly totals (MWh)."""
     date_col = _find_col(df, "date", "Date", "DATE", "time", "Time")
@@ -541,11 +555,24 @@ def chart_seasonal_patterns(cea_data, selected_buildings, output_mode):
     """
     Seasonal patterns — line chart, x=seasons, one line per surface.
     """
-    df = cea_data["files"].get("solar_irradiation_seasonally.csv")
+    df = None
+    if selected_buildings:
+        df = cea_data["files"].get("solar_irradiation_seasonally_buildings.csv")
+    if df is None:
+        df = cea_data["files"].get("solar_irradiation_seasonally.csv")
+    if df is None:
+        df = cea_data["files"].get("solar_irradiation_seasonally_buildings.csv")
     if df is None:
         return None
 
-    period_col = _find_col(df, "period", "season", "Season", "Period")
+    df = df.copy()
+    name_col = _find_col(df, "name", "Name", "building")
+    if selected_buildings and name_col:
+        df = df[df[name_col].isin(selected_buildings)]
+    if df.empty:
+        return None
+
+    period_col = _season_col(df)
     surface_map = {
         "Roof":       next((c for c in df.columns if "roof" in c.lower() and "window" not in c.lower()), None),
         "South wall": next((c for c in df.columns if "south" in c.lower() and "window" not in c.lower()), None),
@@ -558,12 +585,12 @@ def chart_seasonal_patterns(cea_data, selected_buildings, output_mode):
         return None
 
     rows = []
-    for _, row in df.iterrows():
+    for season, group in df.groupby(period_col):
         for surface, col in found.items():
             rows.append({
-                "Season": row[period_col],
+                "Season": str(season).strip().title(),
                 "Surface": surface,
-                "Irradiation (kWh)": float(row[col]) if row[col] == row[col] else 0
+                "Irradiation (kWh)": float(group[col].sum())
             })
     df_long = pd.DataFrame(rows)
 
