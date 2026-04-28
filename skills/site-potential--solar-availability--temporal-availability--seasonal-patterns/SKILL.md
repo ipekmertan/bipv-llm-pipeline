@@ -1,131 +1,99 @@
 ---
 name: site-potential--solar-availability--temporal-availability--seasonal-patterns
-description: Use when the architect wants to understand how solar availability changes across seasons. Reads CEA seasonal irradiation outputs and compares Spring, Summer, Autumn, Winter performance to identify when BIPV is most and least productive.
-intent: Translate CEA's seasonal irradiation breakdown into design-relevant insight about when the building's BIPV system performs, when it underperforms, and what that means for energy strategy decisions.
+description: Use when the architect wants to understand long-term, season-to-season solar availability for BIPV. Reads CEA seasonal irradiation outputs and compares Spring, Summer, Autumn, and Winter performance by opaque surface.
+intent: Show whether the BIPV strategy has a strong seasonal imbalance, which surfaces are most stable across the year, and whether long-term storage, grid dependency, or seasonal demand management should be considered.
 type: component
 position_in_tree: "Goal → Site Potential → Solar Availability → Temporal Availability → Seasonal Patterns"
 ---
 
 ## Purpose
 
-Answer the question: **"When during the year does my building receive the most solar energy, and how much does it drop in winter?"**
+Answer the question: **"How much does solar availability change across the year, and does the project face a long-term seasonal balancing problem?"**
 
-This skill reads CEA's seasonal irradiation output and compares radiation across the four seasons for all opaque surfaces. It identifies peak and low seasons, the ratio between them, and frames the result in terms of what it means for BIPV energy strategy.
+This is the long-term temporal availability skill. It focuses on seasonal imbalance, not hour-of-day matching. It compares Spring, Summer, Autumn, and Winter irradiation by opaque surface and identifies whether winter output drops enough to create long-term grid dependency or seasonal storage pressure.
 
 ---
 
-## File Source
+## Data Used
 
-This skill reads from the uploaded CEA project zip. The app finds the relevant files automatically by filename — no manual file selection needed.
+Primary files:
+- `solar_irradiation_seasonally.csv`
+- `solar_irradiation_seasonally_buildings.csv` when building or cluster selection is active
 
-**Location context** is taken from the project's weather file (`.epw`) found inside the zip.
-## Data Sources
-
-| Cluster | `solar_irradiation_seasonally_buildings.csv` (filtered to named buildings) |
-| Building | `solar_irradiation_seasonally_buildings.csv` (single building, 4 rows) |
-
-**Columns used (opaque surfaces only):**
-- `period` — Spring / Summer / Autumn / Winter
+Columns:
+- `period` for Spring / Summer / Autumn / Winter
 - `irradiation_roof[kWh]`
-- `irradiation_wall_north[kWh]`
 - `irradiation_wall_south[kWh]`
 - `irradiation_wall_east[kWh]`
 - `irradiation_wall_west[kWh]`
+- `irradiation_wall_north[kWh]`
 
-**Columns ignored:**
-- `irradiation_window_*` — windows cannot have BIPV installed
-- `hour_start`, `hour_end`, `nominal_hours`, `coverage_ratio` — metadata only
-
-**Key data observed (from case study):**
-- 4 rows per file at district level: Spring, Summer, Autumn, Winter
-- 4 rows per building at building level (one per season)
-- Summer dominates significantly — roof Summer ≈ 4.8× Winter in this dataset
+Ignored:
+- `irradiation_window_*`, because windows are not BIPV panel surfaces
+- metadata columns such as `hour_start`, `hour_end`, `coverage_ratio`
 
 ---
 
-## Scale Behaviour
+## What Python Should Calculate
 
-**District scale:**
-- Uses `solar_irradiation_seasonally.csv` (4 rows = 4 seasons, whole district)
-- Computes seasonal totals across all surfaces
-- Framing: "District-wide, Summer generates X times more solar energy than Winter"
+Do this before calling the LLM:
 
-**Cluster scale:**
-- Uses `solar_irradiation_seasonally_buildings.csv`, filtered to named buildings
-- Averages seasonal values across the cluster
-- Framing: "Across buildings [B1, B2, B3], the Summer-to-Winter ratio averages X"
+- seasonal total irradiation per opaque surface
+- annual total per surface
+- best and weakest season
+- summer-to-winter ratio or max-season-to-min-season ratio
+- surface with the most stable seasonal profile
+- seasonal imbalance class:
+  - low: ratio < 2
+  - moderate: ratio 2-4
+  - high: ratio > 4
+- seasonal storage warning, if seasonal demand and PV generation are available
 
-**Building scale:**
-- Uses `solar_irradiation_seasonally_buildings.csv`, single building (4 rows)
-- Shows season-by-season breakdown for that building
-- Framing: "For building B1000, Summer roof irradiation is X kWh — dropping to Y kWh in Winter"
-
----
-
-## Benchmark
-
-**Seasonal ratio (Summer ÷ Winter):**
-- Ratio < 2: low seasonal variation — stable year-round performance
-- Ratio 2–4: moderate variation — Winter output still meaningful
-- Ratio > 4: high seasonal variation — Winter output significantly reduced, storage or grid dependency increases
-
-In the Shanghai case study dataset, the roof Summer/Winter ratio is approximately **4.8** — high variation, meaning Winter production is limited and grid dependency will be significant in cold months.
-
-**Context note:** The LLM reads the city from the weather file and frames seasonal variation in the correct geographic context — Shanghai has hot summers and mild winters, so this ratio is expected. A Nordic location would show a much more extreme ratio.
+Do not ask the LLM to infer these values from raw CSV rows.
 
 ---
 
-## Output Modes
+## LLM Role
 
-### If "Explain the numbers" selected:
-**What the LLM produces:**
-- Plain-language explanation of each season's irradiation value per surface
-- The Summer/Winter ratio calculated and explained
-- Comparison to typical ranges for the project's climate zone
-- Note that hours per season differ (Summer has more daylight hours) — so per-hour intensity differences are smaller than total kWh differences suggest
+The LLM should interpret the computed seasonal pattern:
 
-**Visualization:** Grouped bar chart by season
-- X axis: seasons (Spring, Summer, Autumn, Winter)
-- Bars: one colour per surface (roof, south wall, east wall, west wall, north wall)
-- Source data shown below chart
+- whether seasonal variation is mild, moderate, or strong
+- whether winter output remains meaningful
+- whether long-term storage is realistic at building scale
+- whether seasonal imbalance should instead be handled through grid interaction, district infrastructure, thermal storage, or reduced winter self-sufficiency expectations
+- which surfaces are more seasonally stable and why that matters
+
+The LLM should not imply that seasonal battery storage is a normal room-sized design issue. Seasonal storage is usually a district or infrastructure-scale question unless a specific storage technology is provided.
 
 ---
 
-### If "Key takeaway" selected:
-**What the LLM produces:**
-- One headline: "Summer generates X times more solar energy than Winter — your system is strongly seasonal"
-- One sentence on which surface shows the most consistent performance across seasons (often south wall)
-- One sentence on what this means for annual yield reliability
+## Output Expectations
 
-**Visualization:** Line chart across seasons
-- One line per surface
-- X axis: Spring → Summer → Autumn → Winter
-- Clearly shows the peak and drop-off
-- Designed to be readable in a presentation
+**Key takeaway**
+- Start with the strategy answer: whether the project has low, moderate, or high seasonal imbalance.
+- State whether long-term storage is likely relevant, unrealistic at building scale, or not needed.
+- Name the most stable surface or surface mix if it is available in the computed metrics.
 
----
+**Explain the numbers**
+- Explain seasonal totals, the summer/winter or max/min ratio, and what those values mean.
+- Explain why total seasonal kWh changes: day length, sun angle, climate, and surface orientation.
+- Connect the seasonal chart to grid dependency or seasonal self-sufficiency limits.
 
-### If "Design implication" selected:
-**What the LLM produces:**
-- Concrete recommendation on whether seasonal variation is a design concern for this project
-- If ratio > 4: flag that Winter grid dependency is high — recommend investigating storage or demand-matching (links to Demand vs Supply skill)
-- If ratio < 2: confirm that the system performs reliably year-round — low seasonal risk
-- Note on which surfaces are most stable across seasons (useful if consistent output is a priority)
-
-**Visualization:** Seasonal contribution chart
-- Stacked bar showing each season's share of annual total (%)
-- e.g. Summer 42% / Spring 33% / Autumn 17% / Winter 8%
-- Makes the imbalance immediately visible
+**Design implication**
+- Translate the seasonal result into design strategy.
+- If seasonal imbalance is high, avoid promising year-round independence from BIPV alone.
+- If winter output is weak, frame BIPV as reducing annual grid demand while winter reliability comes from grid, district systems, or another storage concept.
+- If a facade has a more stable profile, mention when it may be worth considering despite lower annual yield.
 
 ---
 
 ## Common Pitfalls
 
-- **Hours per season are not equal:** Summer has more daylight hours than Winter. Total kWh difference is therefore partly due to day length, not just radiation intensity. Always note this when explaining numbers.
-- **Seasonal labels are CEA-defined:** CEA uses fixed calendar seasons (Spring = Mar–May, Summer = Jun–Aug, Autumn = Sep–Nov, Winter = Dec–Feb). This may not match the user's intuitive understanding of seasons in their climate.
-- **Do not alarm unnecessarily:** High Summer/Winter ratios are normal and expected in most climates. Frame it as useful information for energy strategy, not as a problem.
-
----
+- Do not confuse seasonal storage with daily battery storage.
+- Do not overpromise long-term storage from ordinary battery rooms.
+- Do not describe high seasonal variation as a design failure; it is normal in many climates.
+- Do not use window irradiation for BIPV panel recommendations.
+- Do not ignore demand. Seasonal storage conclusions are strongest when seasonal demand and PV generation are both available.
 
 ## References
 
