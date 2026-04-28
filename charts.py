@@ -151,11 +151,13 @@ def chart_massing_shading(cea_data, selected_buildings, output_mode):
             ]
             for source_type, source_df in neighbour_sources:
                 for _, neighbour in source_df.iterrows():
+                    if str(neighbour["label"]) == str(building["label"]):
+                        continue
                     nheight = float(neighbour["height_m"]) if neighbour["height_m"] == neighbour["height_m"] else 0
                     distance = _bbox_gap(building, neighbour)
                     critical_distance = max(nheight * 2, 1)
                     if distance <= critical_distance or nheight > bheight:
-                        candidates.append({
+                        candidate = {
                             "target": str(building["label"]),
                             "source": str(neighbour["label"]),
                             "source_type": source_type,
@@ -166,7 +168,7 @@ def chart_massing_shading(cea_data, selected_buildings, output_mode):
                             "distance_m": distance,
                             "height_m": nheight,
                             "direction": _direction_from_to(building, neighbour),
-                        })
+                        }
                         if source_type == "Project-to-project":
                             project_candidates.append(candidate)
                         else:
@@ -906,3 +908,4 @@ def render_skill_chart(skill_id, cea_data, selected_buildings, output_mode):
         return fn(cea_data, selected_buildings, output_mode)
     except Exception:
         return None
+
