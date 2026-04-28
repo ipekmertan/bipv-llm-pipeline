@@ -1,7 +1,7 @@
 ---
 name: site-potential--massing-and-shading-strategy
-description: Use when the architect wants to understand how site massing, surrounding buildings, and shading affect solar access, and what form changes would maximise BIPV potential.
-intent: Turn irradiation and surrounding-geometry evidence into massing recommendations: where to keep height, where to step down, where to increase setbacks, which surfaces to prioritise, and when the building form itself should change.
+description: "Use when the architect wants to understand how site massing, surrounding buildings, and shading affect solar access, and what form changes would maximise BIPV potential."
+intent: "Turn irradiation and surrounding-geometry evidence into massing recommendations: where to keep height, where to step down, where to increase setbacks, which surfaces to prioritise, and when the building form itself should change."
 type: component
 position_in_tree: "Goal -> Site Potential -> Massing & Shading Strategy"
 ---
