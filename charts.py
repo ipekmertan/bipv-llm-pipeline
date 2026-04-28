@@ -584,7 +584,9 @@ def chart_daily_patterns(cea_data, selected_buildings, output_mode):
     """
     Daily patterns — average 24-hour profile, one line per surface.
     """
-    df = cea_data["files"].get("solar_irradiation_daily.csv")
+    df = cea_data["files"].get("solar_irradiation_hourly.csv")
+    if df is None:
+        df = cea_data["files"].get("solar_irradiation_daily.csv")
     if df is None:
         return None
 
@@ -642,7 +644,7 @@ def chart_daily_patterns(cea_data, selected_buildings, output_mode):
     chart = alt.Chart(df_long).mark_line(strokeWidth=2).encode(
         x=alt.X("Hour:Q", title="Hour of day", scale=alt.Scale(domain=[0, 23]),
                 axis=alt.Axis(tickMinStep=1)),
-        y=alt.Y("Irradiation (kWh):Q", title="Average irradiation (kWh)"),
+        y=alt.Y("Irradiation (kWh):Q", title="Average hourly irradiation (kWh)"),
         color=alt.Color("Surface:N", scale=alt.Scale(domain=surface_order, range=color_range),
                         legend=alt.Legend(title="Surface")),
         tooltip=["Hour", "Surface", alt.Tooltip("Irradiation (kWh):Q", format=",.1f")]
@@ -688,5 +690,3 @@ def render_skill_chart(skill_id, cea_data, selected_buildings, output_mode):
         return fn(cea_data, selected_buildings, output_mode)
     except Exception:
         return None
-
-
