@@ -39,6 +39,19 @@
       "status": "complete"
     },
     {
+      "id": "site-potential--solar-availability--temporal-availability--storage-strategy",
+      "display_name": "Storage Strategy",
+      "position_in_tree": [
+        "Site Potential",
+        "Solar Availability",
+        "Temporal Availability",
+        "Storage Strategy"
+      ],
+      "tooltip": "Which surface mix gives the most useful temporal profile, and what short-term or seasonal storage strategy does it imply?",
+      "data_source": "CEA + calculation",
+      "status": "draft"
+    },
+    {
       "id": "site-potential--envelope-suitability",
       "display_name": "Envelope Suitability",
       "position_in_tree": [
