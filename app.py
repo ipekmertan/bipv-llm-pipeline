@@ -16,6 +16,7 @@ SKILL_SIMULATION_MAP = {
     "site-potential--solar-availability--surface-irradiation": ["solar_irradiation"],
     "site-potential--solar-availability--temporal-availability--seasonal-patterns": ["solar_irradiation"],
     "site-potential--solar-availability--temporal-availability--daily-patterns": ["solar_irradiation"],
+    "site-potential--solar-availability--temporal-availability--storage-strategy": ["solar_irradiation", "pv", "demand"],
     "site-potential--envelope-suitability": ["solar_irradiation"],
     "site-potential--massing-and-shading-strategy": ["solar_irradiation"],
     "performance-estimation--energy-generation": ["pv"],
@@ -320,6 +321,235 @@ def build_data_summary(cea_data, selected_buildings=None, scale="District"):
     return "\n".join(lines)
 
 
+COMPACT_SKILL_TASKS = {
+    "site-potential--solar-availability--temporal-availability--daily-patterns": (
+        "Interpret the average 24-hour solar irradiation profile. Focus on when each surface produces, "
+        "which facade supports morning or afternoon generation, and what this implies for BIPV placement "
+        "and demand matching."
+    ),
+    "site-potential--solar-availability--surface-irradiation": (
+        "Interpret annual irradiation totals by opaque surface orientation. Rank surfaces for BIPV, but "
+        "do not classify against kWh/m2 thresholds unless intensity data is explicitly provided."
+    ),
+    "optimize-my-design--panel-type-tradeoff": (
+        "Interpret the simulated PV panel type comparison using actual generation, installed area, yield "
+        "per square metre, and panel database values where available. Avoid assuming one technology is best "
+        "unless the metrics show it."
+    ),
+}
+
+
+def _find_metric_col(df, *keywords):
+    if df is None:
+        return None
+    for kw in keywords:
+        match = next((c for c in df.columns if kw.lower() in c.lower()), None)
+        if match:
+            return match
+    return None
+
+
+def _surface_columns(df):
+    return {
+        "Roof": next((c for c in df.columns if "roof" in c.lower() and "window" not in c.lower()), None),
+        "South wall": next((c for c in df.columns if "south" in c.lower() and "window" not in c.lower()), None),
+        "East wall": next((c for c in df.columns if "east" in c.lower() and "window" not in c.lower()), None),
+        "West wall": next((c for c in df.columns if "west" in c.lower() and "window" not in c.lower()), None),
+        "North wall": next((c for c in df.columns if "north" in c.lower() and "window" not in c.lower()), None),
+    }
+
+
+def _format_number(value, unit="", decimals=0):
+    try:
+        if pd.isna(value):
+            return "not available"
+        return f"{float(value):,.{decimals}f}{unit}"
+    except Exception:
+        return "not available"
+
+
+def compute_daily_pattern_metrics(cea_data):
+    df = cea_data["files"].get("solar_irradiation_hourly.csv")
+    source = "solar_irradiation_hourly.csv"
+    if df is None:
+        return "Hourly irradiation file is not available, so an average 24-hour profile cannot be calculated reliably."
+
+    df = df.copy()
+    time_col = _find_metric_col(df, "date", "time")
+    hour_col = _find_metric_col(df, "hour")
+    if time_col:
+        df["_dt"] = pd.to_datetime(df[time_col], utc=True, errors="coerce")
+        df["_hour"] = df["_dt"].dt.hour
+    elif hour_col:
+        df["_hour"] = pd.to_numeric(df[hour_col], errors="coerce")
+        if df["_hour"].max() > 23:
+            df["_hour"] = df["_hour"] % 24
+    else:
+        return f"{source} is available, but no date/time or hour column was found."
+
+    df = df[df["_hour"].notna()]
+    if df.empty:
+        return f"{source} is available, but the time column could not be parsed."
+    df["_hour"] = df["_hour"].astype(int)
+
+    surfaces = {name: col for name, col in _surface_columns(df).items() if col}
+    if not surfaces:
+        return f"{source} is available, but no opaque surface irradiation columns were found."
+
+    lines = [f"Source: {source}", "Metric: average hourly irradiation by hour of day (0-23), averaged across the year."]
+    for surface, col in surfaces.items():
+        hourly = df.groupby("_hour")[col].mean().reindex(range(24), fill_value=0)
+        peak_hour = int(hourly.idxmax())
+        peak_value = hourly.max()
+        daily_total = hourly.sum()
+        nonzero_hours = [int(h) for h, v in hourly.items() if v > 0]
+        if nonzero_hours:
+            active_window = f"{min(nonzero_hours):02d}:00-{max(nonzero_hours):02d}:00"
+        else:
+            active_window = "none"
+        lines.append(
+            f"- {surface}: peak at {peak_hour:02d}:00 with {_format_number(peak_value, ' kWh', 1)} average; "
+            f"average-day total {_format_number(daily_total, ' kWh', 1)}; active window {active_window}."
+        )
+    return "\n".join(lines)
+
+
+def compute_surface_irradiation_metrics(cea_data, selected_buildings=None, scale="District"):
+    df = cea_data["files"].get("solar_irradiation_annually_buildings.csv")
+    source = "solar_irradiation_annually_buildings.csv"
+    if df is None:
+        df = cea_data["files"].get("solar_irradiation_annually.csv")
+        source = "solar_irradiation_annually.csv"
+    if df is None:
+        return "Annual irradiation outputs are not available."
+
+    df = df.copy()
+    name_col = _find_metric_col(df, "name", "building")
+    if selected_buildings and name_col:
+        df = df[df[name_col].isin(selected_buildings)]
+    if df.empty:
+        return "Annual irradiation data is available, but no rows match the selected buildings."
+
+    surfaces = {name: col for name, col in _surface_columns(df).items() if col}
+    if not surfaces:
+        return f"{source} is available, but no opaque surface irradiation columns were found."
+
+    totals = {surface: float(df[col].sum()) for surface, col in surfaces.items()}
+    ranked = sorted(totals.items(), key=lambda item: item[1], reverse=True)
+    total_all = sum(totals.values())
+    lines = [
+        f"Source: {source}",
+        f"Scale: {scale}",
+        "Important limitation: values are total annual kWh, not kWh/m2 intensity. Use them for relative ranking unless surface areas are supplied.",
+        f"Total opaque-surface irradiation: {_format_number(total_all, ' kWh/year')}.",
+        f"Best surface by total irradiation: {ranked[0][0]} ({_format_number(ranked[0][1], ' kWh/year')}).",
+        f"Weakest surface by total irradiation: {ranked[-1][0]} ({_format_number(ranked[-1][1], ' kWh/year')}).",
+        "Surface ranking:",
+    ]
+    for surface, value in ranked:
+        share = (value / total_all * 100) if total_all else 0
+        lines.append(f"- {surface}: {_format_number(value, ' kWh/year')} ({share:.1f}% of opaque-surface total).")
+    return "\n".join(lines)
+
+
+def compute_panel_tradeoff_metrics(cea_data, selected_buildings=None):
+    files = cea_data.get("files", {})
+    panel_db = files.get("PHOTOVOLTAIC_PANELS.csv")
+    panel_lookup = {}
+    if panel_db is not None:
+        code_col = _find_metric_col(panel_db, "code")
+        if code_col:
+            for _, row in panel_db.iterrows():
+                panel_lookup[str(row[code_col])] = row
+
+    rows = []
+    for ptype in ["PV1", "PV2", "PV3", "PV4"]:
+        df = files.get(f"PV_{ptype}_total_buildings.csv")
+        source = f"PV_{ptype}_total_buildings.csv"
+        if df is None:
+            df = files.get(f"PV_{ptype}_total.csv")
+            source = f"PV_{ptype}_total.csv"
+        if df is None:
+            continue
+
+        df = df.copy()
+        name_col = _find_metric_col(df, "name", "building")
+        if selected_buildings and name_col:
+            df = df[df[name_col].isin(selected_buildings)]
+        if df.empty:
+            continue
+
+        gen_col = _find_metric_col(df, "E_PV_gen", "E_PV", "electricity")
+        area_col = _find_metric_col(df, "Area_PV", "area_pv", "m2")
+        annual_gen = float(df[gen_col].sum()) if gen_col else 0
+        area = float(df[area_col].sum()) if area_col else 0
+        yield_m2 = annual_gen / area if area else None
+
+        db_row = panel_lookup.get(ptype)
+        description = ptype
+        efficiency = embodied = facade_cost = roof_cost = None
+        if db_row is not None:
+            desc_col = _find_metric_col(panel_db, "description")
+            eff_col = _find_metric_col(panel_db, "PV_n", "efficiency")
+            emb_col = _find_metric_col(panel_db, "module_embodied", "embodied", "CO2")
+            facade_cost_col = _find_metric_col(panel_db, "cost_facade", "facade")
+            roof_cost_col = _find_metric_col(panel_db, "cost_roof", "roof")
+            description = str(db_row[desc_col]) if desc_col else ptype
+            efficiency = db_row[eff_col] if eff_col else None
+            embodied = db_row[emb_col] if emb_col else None
+            facade_cost = db_row[facade_cost_col] if facade_cost_col else None
+            roof_cost = db_row[roof_cost_col] if roof_cost_col else None
+
+        rows.append({
+            "ptype": ptype,
+            "description": description,
+            "source": source,
+            "annual_gen": annual_gen,
+            "area": area,
+            "yield_m2": yield_m2,
+            "efficiency": efficiency,
+            "embodied": embodied,
+            "facade_cost": facade_cost,
+            "roof_cost": roof_cost,
+        })
+
+    if not rows:
+        return "No PV panel type result files are available for comparison."
+
+    ranked_generation = sorted(rows, key=lambda r: r["annual_gen"], reverse=True)
+    ranked_yield = sorted([r for r in rows if r["yield_m2"] is not None], key=lambda r: r["yield_m2"], reverse=True)
+    lines = [
+        "Source: simulated PV result files plus PHOTOVOLTAIC_PANELS.csv when available.",
+        f"Panel types found: {', '.join(r['ptype'] for r in rows)}.",
+        f"Highest total generation: {ranked_generation[0]['ptype']} ({ranked_generation[0]['description']}) with {_format_number(ranked_generation[0]['annual_gen'], ' kWh/year')}.",
+    ]
+    if ranked_yield:
+        lines.append(
+            f"Highest yield per installed area: {ranked_yield[0]['ptype']} ({ranked_yield[0]['description']}) "
+            f"with {_format_number(ranked_yield[0]['yield_m2'], ' kWh/m2/year', 1)}."
+        )
+    lines.append("Panel comparison:")
+    for row in rows:
+        lines.append(
+            f"- {row['ptype']} ({row['description']}): generation {_format_number(row['annual_gen'], ' kWh/year')}; "
+            f"area {_format_number(row['area'], ' m2', 1)}; yield {_format_number(row['yield_m2'], ' kWh/m2/year', 1)}; "
+            f"efficiency {_format_number(float(row['efficiency']) * 100 if row['efficiency'] is not None else None, '%', 1)}; "
+            f"embodied carbon {_format_number(row['embodied'], ' kgCO2/m2', 1)}; "
+            f"roof cost {_format_number(row['roof_cost'], ' currency/m2', 1)}; facade cost {_format_number(row['facade_cost'], ' currency/m2', 1)}."
+        )
+    return "\n".join(lines)
+
+
+def compute_compact_metrics(skill_id, cea_data, selected_buildings=None, scale="District"):
+    if skill_id == "site-potential--solar-availability--temporal-availability--daily-patterns":
+        return compute_daily_pattern_metrics(cea_data)
+    if skill_id == "site-potential--solar-availability--surface-irradiation":
+        return compute_surface_irradiation_metrics(cea_data, selected_buildings, scale)
+    if skill_id == "optimize-my-design--panel-type-tradeoff":
+        return compute_panel_tradeoff_metrics(cea_data, selected_buildings)
+    return None
+
+
 def call_llm(system_prompt, messages):
     import time
     api_key = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
@@ -352,7 +582,7 @@ def call_llm(system_prompt, messages):
             return f"⚠️ API error: {e}"
 
 
-def build_system_prompt(skill_md, cea_summary, output_mode, scale, selected_buildings=None):
+def build_system_prompt(skill_md, cea_summary, output_mode, scale, selected_buildings=None, skill_id=None, cea_data=None):
     building_context = ""
     if selected_buildings:
         building_context = f"\nFocus your analysis specifically on: {', '.join(selected_buildings)}."
@@ -385,6 +615,31 @@ A practical recipe for the architect based on the results. No charts.
     }
 
     mode_block = mode_instructions.get(output_mode, f"Output mode: {output_mode}")
+
+    compact_metrics = None
+    if skill_id in COMPACT_SKILL_TASKS and cea_data is not None:
+        compact_metrics = compute_compact_metrics(
+            skill_id,
+            cea_data,
+            selected_buildings=selected_buildings,
+            scale=scale,
+        )
+
+    if compact_metrics:
+        return f"""You are a BIPV expert helping architects interpret CEA4 simulation results.
+Scale: {scale}{building_context}
+
+{mode_block}
+
+## Skill task
+{COMPACT_SKILL_TASKS[skill_id]}
+
+## Computed metrics
+{compact_metrics}
+
+Use only the computed metrics above. Do not invent missing values, sources, tariffs, regulations, or file contents. If a value is unavailable, say so briefly and explain the limitation.
+Do NOT describe, mention, or suggest visualizations or charts — these are generated automatically by the app.
+Do NOT use markdown headers (#) or numbered lists. You MAY use **bold** sparingly for key numbers and surface names."""
 
     return f"""You are a BIPV expert helping architects interpret CEA4 simulation results.
 Scale: {scale}{building_context}
@@ -718,8 +973,9 @@ else:
                     st.session_state.selected_building = chosen
                 elif st.session_state.tree_scale == "Cluster":
                     n = len(st.session_state.selected_cluster)
+                    selected_label = "No buildings selected yet" if n == 0 else f"{n} building{'s' if n > 1 else ''} selected"
                     st.markdown(
-                        f'<div class="cluster-counter">{"No buildings selected yet" if n == 0 else f"{n} building{"s" if n > 1 else ""} selected"}</div>',
+                        f'<div class="cluster-counter">{selected_label}</div>',
                         unsafe_allow_html=True
                     )
                     st.markdown("**Select buildings for cluster**")
@@ -842,6 +1098,7 @@ else:
                     SUBANALYSIS_TOOLTIPS = {
                         "Seasonal Patterns": "How does solar availability change across the seasons?",
                         "Daily Patterns": "How does solar availability vary across a typical day?",
+                        "Storage Strategy": "What storage and surface-mix strategy follows from daily and seasonal availability?",
                     }
                     for grandchild, grandchild_node in child_node["children"].items():
                         grandchild_tooltip = SUBANALYSIS_TOOLTIPS.get(grandchild, "")
@@ -969,7 +1226,9 @@ else:
                 skill_md, cea_summary,
                 st.session_state.tree_mode,
                 scale,
-                selected_buildings=selected_buildings
+                selected_buildings=selected_buildings,
+                skill_id=st.session_state.skill_id,
+                cea_data=st.session_state.cea_data
             )
             st.session_state.cached_system_prompt = system_prompt
 
