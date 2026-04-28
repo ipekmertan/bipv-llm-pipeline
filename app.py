@@ -126,6 +126,11 @@ def extract_cea_zip(uploaded_file):
                 try: result["files"][fpath.name] = pd.read_csv(fpath)
                 except: pass
 
+        envelope = scenario / "inputs" / "building-properties" / "envelope.csv"
+        if envelope.exists():
+            try: result["files"]["envelope.csv"] = pd.read_csv(envelope)
+            except: pass
+
         fpath = scenario / "inputs" / "database" / "COMPONENTS" / "CONVERSION" / "PHOTOVOLTAIC_PANELS.csv"
         if fpath.exists():
             try: result["files"]["PHOTOVOLTAIC_PANELS.csv"] = pd.read_csv(fpath)
@@ -335,6 +340,11 @@ COMPACT_SKILL_TASKS = {
     "site-potential--solar-availability--surface-irradiation": (
         "Interpret annual irradiation totals by opaque surface orientation. Rank surfaces for BIPV, but "
         "do not classify against kWh/m2 thresholds unless intensity data is explicitly provided."
+    ),
+    "site-potential--envelope-suitability": (
+        "Synthesize solar potential, available area or simulated installed area, WWR, accessibility, "
+        "and visibility into a surface-by-surface BIPV suitability matrix. Identify integration opportunities "
+        "and data-visible conflicts without repeating generic BIPV advice."
     ),
     "optimize-my-design--panel-type-tradeoff": (
         "Interpret the simulated PV panel type comparison using actual generation, installed area, yield "
@@ -593,6 +603,183 @@ def compute_surface_irradiation_metrics(cea_data, selected_buildings=None, scale
     return "\n".join(lines)
 
 
+def compute_envelope_suitability_metrics(cea_data, selected_buildings=None, scale="District"):
+    files = cea_data.get("files", {})
+    irr_df = files.get("solar_irradiation_annually_buildings.csv")
+    irr_source = "solar_irradiation_annually_buildings.csv"
+    if irr_df is None:
+        irr_df = files.get("solar_irradiation_annually.csv")
+        irr_source = "solar_irradiation_annually.csv"
+    if irr_df is None:
+        return "Annual irradiation data is not available, so envelope suitability cannot be grounded in solar potential."
+
+    irr_df = irr_df.copy()
+    name_col = _find_metric_col(irr_df, "name", "building")
+    if selected_buildings and name_col:
+        irr_df = irr_df[irr_df[name_col].isin(selected_buildings)]
+    if irr_df.empty:
+        return "Annual irradiation data is available, but no rows match the selected buildings."
+
+    envelope_df = files.get("envelope.csv")
+    if envelope_df is not None:
+        envelope_df = envelope_df.copy()
+        env_name_col = _find_metric_col(envelope_df, "name", "building")
+        if selected_buildings and env_name_col:
+            envelope_df = envelope_df[envelope_df[env_name_col].isin(selected_buildings)]
+
+    pv_area_df = None
+    pv_area_source = None
+    for ptype in ["PV1", "PV2", "PV3", "PV4"]:
+        candidate = files.get(f"PV_{ptype}_total_buildings.csv")
+        if candidate is not None:
+            pv_area_df = candidate.copy()
+            pv_area_source = f"PV_{ptype}_total_buildings.csv"
+            break
+    if pv_area_df is not None:
+        pv_name_col = _find_metric_col(pv_area_df, "name", "building")
+        if selected_buildings and pv_name_col:
+            pv_area_df = pv_area_df[pv_area_df[pv_name_col].isin(selected_buildings)]
+
+    surfaces = {name: col for name, col in _surface_columns(irr_df).items() if col}
+    if not surfaces:
+        return f"{irr_source} is available, but no opaque surface irradiation columns were found."
+
+    area_cols = {
+        "Roof": "PV_roofs_top_m2",
+        "South wall": "PV_walls_south_m2",
+        "East wall": "PV_walls_east_m2",
+        "West wall": "PV_walls_west_m2",
+        "North wall": "PV_walls_north_m2",
+    }
+    wwr_cols = {
+        "South wall": "wwr_south",
+        "East wall": "wwr_east",
+        "West wall": "wwr_west",
+        "North wall": "wwr_north",
+    }
+
+    irradiation_totals = {surface: float(irr_df[col].sum()) for surface, col in surfaces.items()}
+    max_irradiation = max(irradiation_totals.values()) if irradiation_totals else 0
+    total_irradiation = sum(irradiation_totals.values())
+
+    rows = []
+    for surface, irradiation in irradiation_totals.items():
+        solar_share = (irradiation / total_irradiation * 100) if total_irradiation else 0
+        solar_score = (irradiation / max_irradiation) if max_irradiation else 0
+
+        installed_area = None
+        area_col = area_cols.get(surface)
+        if pv_area_df is not None and area_col in pv_area_df.columns:
+            installed_area = float(pv_area_df[area_col].sum())
+
+        wwr = None
+        if envelope_df is not None and surface in wwr_cols and wwr_cols[surface] in envelope_df.columns:
+            wwr = float(pd.to_numeric(envelope_df[wwr_cols[surface]], errors="coerce").mean())
+
+        if surface == "Roof":
+            access = "medium: usually reachable, but roof equipment and access paths can reduce usable area"
+            visibility = "low: often the least visible BIPV surface from street level"
+            constructability_score = 1.0
+        else:
+            if wwr is None:
+                constructability_score = 0.6
+                continuity = "unknown WWR"
+            elif wwr <= 0.35:
+                constructability_score = 0.9
+                continuity = "low glazing, likely more continuous opaque area"
+            elif wwr <= 0.6:
+                constructability_score = 0.65
+                continuity = "moderate glazing, selective facade zones likely"
+            else:
+                constructability_score = 0.35
+                continuity = "high glazing, fragmented opaque area likely"
+            access = f"medium: vertical installation and maintenance access needed; {continuity}"
+            visibility = "high: facade BIPV will be architecturally visible"
+
+        if installed_area is not None and installed_area <= 0 and surface != "Roof":
+            area_note = "no PV area was simulated on this facade"
+            area_score = 0.35
+        elif installed_area is not None:
+            area_note = f"simulated PV area {_format_number(installed_area, ' m2', 1)}"
+            area_score = min(installed_area / 500, 1.0)
+        else:
+            area_note = "surface area not extracted; use WWR and irradiation as proxies"
+            area_score = constructability_score
+
+        score = (0.45 * solar_score) + (0.25 * area_score) + (0.20 * constructability_score) + (0.10 if surface == "Roof" else 0.08)
+        if score >= 0.68:
+            suitability = "HIGH"
+        elif score >= 0.42:
+            suitability = "MEDIUM"
+        else:
+            suitability = "LOW"
+
+        rows.append({
+            "surface": surface,
+            "irradiation": irradiation,
+            "solar_share": solar_share,
+            "wwr": wwr,
+            "area_note": area_note,
+            "access": access,
+            "visibility": visibility,
+            "suitability": suitability,
+            "score": score,
+        })
+
+    rows = sorted(rows, key=lambda item: item["score"], reverse=True)
+    high_rows = [row for row in rows if row["suitability"] == "HIGH"]
+    visible_high = [row for row in high_rows if "facade" in row["visibility"]]
+    roof_row = next((row for row in rows if row["surface"] == "Roof"), None)
+
+    lines = [
+        f"Sources: {irr_source}; envelope.csv {'available' if envelope_df is not None else 'not available'}; {pv_area_source or 'no PV building area file available'}.",
+        f"Scale: {scale}",
+        "Suitability combines solar potential, simulated PV area when available, WWR/continuity, accessibility, and visibility. Visibility/accessibility are early-design heuristics, not measured site-survey data.",
+        "Suitability matrix:",
+    ]
+    for row in rows:
+        wwr_text = _format_number(row["wwr"] * 100, '%', 0) if row["wwr"] is not None else "not available"
+        lines.append(
+            f"- {row['surface']}: solar {_format_number(row['irradiation'], ' kWh/year')} "
+            f"({row['solar_share']:.1f}% of opaque-surface irradiation); WWR {wwr_text}; "
+            f"{row['area_note']}; access {row['access']}; visibility {row['visibility']}; "
+            f"suitability {row['suitability']}."
+        )
+
+    lines.append("Integration opportunities:")
+    if roof_row and roof_row["suitability"] in ["HIGH", "MEDIUM"]:
+        lines.append(f"- Roof: {roof_row['suitability']} suitability with low visibility; treat as the least aesthetically constrained BIPV surface.")
+    if visible_high:
+        for row in visible_high:
+            lines.append(f"- {row['surface']}: high suitability and high visibility; treat BIPV as an architectural facade decision, not only a technical add-on.")
+    if not visible_high and high_rows:
+        lines.append("- High-suitability surfaces are mostly low-visibility or technically dominant; facade expression may need a separate design argument.")
+
+    conflicts = []
+    if pv_area_df is not None:
+        high_solar_facades = [
+            row for row in rows
+            if row["surface"] != "Roof"
+            and row["solar_share"] >= 10
+            and "no PV area was simulated" in row["area_note"]
+        ]
+        for row in high_solar_facades:
+            conflicts.append(
+                f"{row['surface']} has meaningful irradiation ({row['solar_share']:.1f}% share) but no simulated PV area; check whether facade PV was excluded in the simulation setup."
+            )
+    if envelope_df is None:
+        conflicts.append("envelope.csv is missing, so WWR/opaque-area suitability cannot be checked.")
+
+    lines.append("Conflict flags:")
+    if conflicts:
+        for conflict in conflicts:
+            lines.append(f"- {conflict}")
+    else:
+        lines.append("- No data-visible conflict detected. User design intentions such as terraces, heritage constraints, or planned equipment zones are not included in the CEA files.")
+
+    return "\n".join(lines)
+
+
 def compute_panel_tradeoff_metrics(cea_data, selected_buildings=None):
     files = cea_data.get("files", {})
     panel_db = files.get("PHOTOVOLTAIC_PANELS.csv")
@@ -688,6 +875,8 @@ def compute_compact_metrics(skill_id, cea_data, selected_buildings=None, scale="
         return compute_daily_pattern_metrics(cea_data)
     if skill_id == "site-potential--solar-availability--surface-irradiation":
         return compute_surface_irradiation_metrics(cea_data, selected_buildings, scale)
+    if skill_id == "site-potential--envelope-suitability":
+        return compute_envelope_suitability_metrics(cea_data, selected_buildings, scale)
     if skill_id == "optimize-my-design--panel-type-tradeoff":
         return compute_panel_tradeoff_metrics(cea_data, selected_buildings)
     return None
