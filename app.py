@@ -755,6 +755,16 @@ def compute_envelope_suitability_metrics(cea_data, selected_buildings=None, scal
     if not visible_high and high_rows:
         lines.append("- High-suitability surfaces are mostly low-visibility or technically dominant; facade expression may need a separate design argument.")
 
+    visible_facades = [row for row in rows if row["surface"] != "Roof" and row["suitability"] in ["HIGH", "MEDIUM"]]
+    if visible_facades:
+        lines.append("Visible-facade BIPV option names to suggest when relevant:")
+        lines.append("- Opaque BIPV facade cladding / BIPV rainscreen: for solid wall zones where PV can replace conventional facade panels.")
+        lines.append("- Colored or patterned BIPV modules: for prominent elevations where module appearance must be coordinated with facade design.")
+        lines.append("- Semi-transparent BIPV glazing: for glazed zones where daylight and view should be retained while generating electricity.")
+        lines.append("- BIPV curtain wall or PV spandrel panels: for office/commercial facades with repeated facade modules.")
+        lines.append("- PV shading devices / BIPV louvers: for facades where solar control, daylight control, and generation can be combined.")
+        lines.append("- Ventilated BIPV facade / BIPV-T facade: for assemblies where rear ventilation or heat recovery is part of the design concept.")
+
     conflicts = []
     if pv_area_df is not None:
         high_solar_facades = [
@@ -1629,4 +1639,3 @@ else:
                     response = call_llm(system_prompt, recent_history)
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
                 st.rerun()
-
