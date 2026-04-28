@@ -1022,6 +1022,7 @@ def compute_massing_shading_metrics(cea_data, selected_buildings=None, scale="Di
     )
 
     obstruction_notes = []
+    obstruction_rankings = []
     if geometry_ok:
         for _, building in selected_zone.iterrows():
             bname = str(building[zone_name_col]) if zone_name_col else "selected building"
@@ -1043,6 +1044,10 @@ def compute_massing_shading_metrics(cea_data, selected_buildings=None, scale="Di
                     direction = _direction_from_to(building, neighbour)
                     critical_distance = max(nheight * 2, 1)
                     if distance <= critical_distance or nheight > bheight:
+                        influence_ratio = critical_distance / max(distance, 1)
+                        height_ratio = nheight / max(bheight, 1)
+                        side_weight = 1.25 if direction == "south" else 1.0 if direction in ("east", "west") else 0.65
+                        risk_score = influence_ratio * max(height_ratio, 0.25) * side_weight
                         candidate = {
                             "name": nname,
                             "height": nheight,
@@ -1050,14 +1055,21 @@ def compute_massing_shading_metrics(cea_data, selected_buildings=None, scale="Di
                             "direction": direction,
                             "critical_distance": critical_distance,
                             "taller": nheight > bheight,
+                            "source_type": source_type,
+                            "risk_score": risk_score,
+                            "influence_ratio": influence_ratio,
                         }
                         if source_type == "project building":
                             internal_candidates.append(candidate)
                         else:
                             external_candidates.append(candidate)
+                        obstruction_rankings.append({
+                            "target": bname,
+                            **candidate,
+                        })
 
-            external_candidates = sorted(external_candidates, key=lambda item: (item["distance"], -item["height"]))[:5]
-            internal_candidates = sorted(internal_candidates, key=lambda item: (item["distance"], -item["height"]))[:5]
+            external_candidates = sorted(external_candidates, key=lambda item: item["risk_score"], reverse=True)[:5]
+            internal_candidates = sorted(internal_candidates, key=lambda item: item["risk_score"], reverse=True)[:5]
 
             if external_candidates:
                 lines.append(f"External obstruction context for {bname} (height approx. {_format_number(bheight, ' m', 1)}):")
@@ -1095,6 +1107,17 @@ def compute_massing_shading_metrics(cea_data, selected_buildings=None, scale="Di
         lines.append("Likely shading constraints:")
         for note in sorted(set(obstruction_notes))[:8]:
             lines.append(f"- {note}")
+
+    if obstruction_rankings:
+        lines.append("Ranked obstruction risk by side (geometry screening, not exact kWh loss):")
+        for c in sorted(obstruction_rankings, key=lambda item: item["risk_score"], reverse=True)[:12]:
+            source_label = "project" if c["source_type"] == "project building" else "surrounding"
+            lines.append(
+                f"- {c['target']} {c['direction']} side: {source_label} building {c['name']}; "
+                f"risk score {c['risk_score']:.2f}; height {_format_number(c['height'], ' m', 1)}; "
+                f"gap {_format_number(c['distance'], ' m', 1)}; 2H/gap ratio {c['influence_ratio']:.2f}."
+            )
+        lines.append("Use the ranked obstruction list to say which side is most constrained and by which building. Do not call the score a simulated shading loss.")
 
     lines.append("Massing strategy options to consider:")
     lines.append("- Preserve or expand the highest-irradiation roof plane as the baseline solar collector.")
@@ -1264,42 +1287,42 @@ def render_massing_strategy_sketches(text, skill_id, output_mode):
             "keys": ["step", "terrace"],
             "title": "Stepped / Terraced Massing",
             "note": "Lower the solar-critical edge and use upper setbacks as exposed PV roof planes.",
-            "blocks": [(0, 0, 0, 86, 54, 95), (68, 0, 0, 86, 54, 65), (136, 0, 0, 86, 54, 36)],
+            "blocks": [(0, 0, 0, 78, 50, 82), (72, 0, 0, 78, 50, 54), (144, 0, 0, 78, 50, 30)],
             "sun": "south sun",
         },
         {
             "keys": ["split", "bar"],
             "title": "Split-Bar Massing",
             "note": "Break a bulky block into thinner bars to reduce self-shading and expose more facade/roof area.",
-            "blocks": [(0, 0, 0, 70, 48, 78), (130, 0, 0, 70, 48, 78)],
+            "blocks": [(0, 0, 0, 68, 46, 68), (128, 0, 0, 68, 46, 68)],
             "sun": "gap for light",
         },
         {
             "keys": ["courtyard", "void", "carve", "subtractive"],
             "title": "Subtractive / Courtyard Massing",
             "note": "Start from the allowed volume, then carve a void where it improves solar and daylight access.",
-            "blocks": [(0, 0, 0, 62, 50, 76), (62, 0, 0, 62, 50, 76), (124, 0, 0, 62, 50, 76), (0, 78, 0, 62, 50, 76), (124, 78, 0, 62, 50, 76)],
+            "blocks": [(0, 0, 0, 56, 44, 62), (56, 0, 0, 56, 44, 62), (112, 0, 0, 56, 44, 62), (0, 68, 0, 56, 44, 62), (112, 68, 0, 56, 44, 62)],
             "sun": "carved void",
         },
         {
             "keys": ["setback", "spacing", "distance"],
             "title": "Increase Setback",
             "note": "Open distance from a tall obstruction before treating the shaded facade as a main PV surface.",
-            "blocks": [(0, 0, 0, 70, 54, 110), (165, 0, 0, 78, 54, 62)],
+            "blocks": [(0, 0, 0, 62, 48, 86), (154, 0, 0, 68, 48, 50)],
             "sun": "setback",
         },
         {
             "keys": ["north", "shift height", "shift the height", "dense program"],
             "title": "Shift Height Northward",
             "note": "Keep taller program volume away from the solar-critical south edge.",
-            "blocks": [(10, 0, 0, 86, 54, 45), (102, 0, 0, 86, 54, 105)],
+            "blocks": [(10, 0, 0, 78, 50, 36), (100, 0, 0, 78, 50, 82)],
             "sun": "lower south edge",
         },
         {
             "keys": ["stilt", "lift"],
             "title": "Lifted / Stilted Massing",
             "note": "Lift part of the volume to reduce ground-level obstruction and improve porosity/daylight.",
-            "blocks": [(32, 0, 52, 154, 54, 50)],
+            "blocks": [(32, 0, 42, 142, 48, 42)],
             "stilts": True,
             "sun": "open ground",
         },
@@ -1317,7 +1340,9 @@ def render_massing_strategy_sketches(text, skill_id, output_mode):
         x, y, z, w, d, h = block
         return (
             f'<div class="iso-block" style="--x:{x}px;--y:{y}px;--z:{z}px;'
-            f'--w:{w}px;--d:{d}px;--h:{h}px;"></div>'
+            f'--w:{w}px;--d:{d}px;--h:{h}px;">'
+            '<span class="face top"></span><span class="face front"></span><span class="face side"></span>'
+            '</div>'
         )
 
     cards = []
@@ -1352,7 +1377,7 @@ def render_massing_strategy_sketches(text, skill_id, output_mode):
         background:#fffdf8;
         border-radius:8px;
         padding:12px 12px 10px 12px;
-        min-height:230px;
+        min-height:300px;
       }}
       .sketch-title {{
         color:#2d3142;
@@ -1361,7 +1386,7 @@ def render_massing_strategy_sketches(text, skill_id, output_mode):
         margin-bottom:4px;
       }}
       .scene-wrap {{
-        height:145px;
+        height:220px;
         position:relative;
         overflow:hidden;
       }}
@@ -1378,10 +1403,10 @@ def render_massing_strategy_sketches(text, skill_id, output_mode):
       .iso-scene {{
         position:absolute;
         left:50%;
-        top:96px;
-        width:260px;
-        height:140px;
-        transform:translateX(-50%) rotateX(58deg) rotateZ(-38deg);
+        top:142px;
+        width:300px;
+        height:220px;
+        transform:translateX(-50%) scale(.92) rotateX(58deg) rotateZ(-38deg);
         transform-style:preserve-3d;
       }}
       .iso-block {{
@@ -1392,23 +1417,31 @@ def render_massing_strategy_sketches(text, skill_id, output_mode):
         height:var(--d);
         transform:translateZ(var(--z));
         transform-style:preserve-3d;
-        background:#d8bf84;
-        outline:1px solid rgba(45,49,66,.18);
+        background:transparent;
       }}
-      .iso-block:before {{
-        content:"";
+      .iso-block .face {{
         position:absolute;
+        display:block;
+        box-sizing:border-box;
+        border:1px solid rgba(45,49,66,.18);
+      }}
+      .iso-block .top {{
         left:0;
         top:0;
+        width:100%;
+        height:100%;
+        background:#d8bf84;
+      }}
+      .iso-block .front {{
+        left:0;
+        top:100%;
         width:100%;
         height:var(--h);
         background:#b9a06b;
         transform-origin:top;
         transform:rotateX(-90deg);
-        outline:1px solid rgba(45,49,66,.14);
       }}
-      .iso-block:after {{
-        content:"";
+      .iso-block .side {{
         position:absolute;
         right:0;
         top:0;
@@ -1417,7 +1450,6 @@ def render_massing_strategy_sketches(text, skill_id, output_mode):
         background:#8fbf9f;
         transform-origin:right;
         transform:rotateY(90deg);
-        outline:1px solid rgba(45,49,66,.14);
       }}
       .stilt {{
         position:absolute;
@@ -1448,7 +1480,7 @@ def render_massing_strategy_sketches(text, skill_id, output_mode):
     </style>
     <div class="sketch-grid">{''.join(cards)}</div>
     """
-    components.html(html, height=285 if len(cards) <= 3 else 560, scrolling=False)
+    components.html(html, height=380 if len(cards) <= 3 else 720, scrolling=False)
 
 
 def build_system_prompt(skill_md, cea_summary, output_mode, scale, selected_buildings=None, skill_id=None, cea_data=None):
@@ -2172,3 +2204,4 @@ else:
                     response = call_llm(system_prompt, recent_history)
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
                 st.rerun()
+
