@@ -1,191 +1,138 @@
 ---
 name: site-potential--massing-and-shading-strategy
-description: Use when the architect wants to understand how surrounding context affects solar access across their project, and how massing or positioning decisions can maximise BIPV potential. Reads CEA surroundings geometry and irradiation data to identify shading-constrained buildings and surfaces, and provides early design guidance on massing strategy.
-intent: Move beyond reporting shading as a problem and instead use it as a design input — identifying which buildings or surfaces are most constrained by context, which are least affected, and what massing or spacing decisions would improve solar access for BIPV.
+description: Use when the architect wants to understand how site massing, surrounding buildings, and shading affect solar access, and what form changes would maximise BIPV potential.
+intent: Turn irradiation and surrounding-geometry evidence into massing recommendations: where to keep height, where to step down, where to increase setbacks, which surfaces to prioritise, and when the building form itself should change.
 type: component
-position_in_tree: "Goal → Site Potential → Massing & Shading Strategy"
+position_in_tree: "Goal -> Site Potential -> Massing & Shading Strategy"
 ---
 
 ## Purpose
 
-Answer the question: **"How does the surrounding context affect solar access across my project, and what massing decisions would improve BIPV potential?"**
+Answer the question: **"What massing strategy would give this project the best solar access for BIPV?"**
 
-This skill uses CEA's surroundings geometry data combined with irradiation results to understand the shadow-casting context of the project. It operates at two levels:
+This skill is not a surface-ranking skill. It is a form-making and shading strategy node. It should integrate:
 
-- **Analysis** — which buildings or surfaces are most affected by neighbouring context
-- **Early design guidance** — what massing, spacing, or orientation decisions would reduce shading and maximise BIPV potential
+- surrounding building geometry and height
+- project building geometry and height
+- annual irradiation by building and opaque surface
+- likely obstruction directions
+- best solar-exposed surfaces
+- surfaces that are weak enough to deprioritise
+- massing changes that could improve the result
 
-**Important note on how shading works in CEA:**
-CEA does not produce a separate shading output file. Instead, shading from surrounding buildings is already embedded in the irradiation values — when CEA calculates solar irradiation per surface, it uses `surroundings.shp` to cast shadows. This means surfaces performing lower than expected for their orientation are likely shading-constrained. This skill makes that relationship visible and actionable.
-
----
-
-## File Source
-
-This skill reads from the uploaded CEA project zip. The app finds the relevant files automatically by filename — no manual file selection needed.
-
-**Location context** is taken from the project's weather file (`.epw`) found inside the zip.
-
-## Data Sources
-
-**Primary CEA files accessed via InputLocator:**
-
-| File | What it provides |
-|------|-----------------|
-| `surroundings.shp` | Neighbouring building footprints and heights |
-| `zone.shp` | Project building footprints and heights |
-| `solar_irradiation_annually_buildings.csv` | Actual irradiation per building — used to identify underperformers |
+The form is allowed to change substantially if that is the best solar strategy. Do not assume the existing massing is fixed unless the user says it is.
 
 ---
 
-## Analysis Logic
+## Data Used
 
-**Step 1 — Identify shading-constrained buildings:**
-Compare each project building's irradiation values against the expected range for its orientation and climate zone. Buildings significantly below expected values are flagged as potentially shading-constrained.
+Primary:
+- `zone.shp` / `zone.dbf`, extracted as compact project geometry
+- `surroundings.shp` / `surroundings.dbf`, extracted as compact surrounding geometry
+- `solar_irradiation_annually_buildings.csv`
 
-**Step 2 — Identify shadow-casting neighbours:**
-For each flagged building, check `surroundings.shp` for neighbouring structures that are:
-- Taller than the project building, or
-- Within a critical distance (approximately 2× the neighbour's height to the south in northern hemisphere, 2× to the north in southern hemisphere)
+Useful fields:
+- building name
+- height or floors above ground
+- footprint bounding box and centroid
+- annual roof irradiation
+- annual north/south/east/west wall irradiation
 
-**Step 3 — Calculate shading impact estimate:**
-```
-shading_impact = (expected_irradiation - actual_irradiation) ÷ expected_irradiation × 100%
-```
-This gives an approximate percentage of irradiation lost to shading per building.
-
-**Step 4 — Early design mode:**
-If the architect has not yet finalised massing, the skill uses surroundings data to suggest:
-- Minimum building spacing to avoid mutual shading
-- Optimal building height relative to neighbours for maximum solar access
-- Which parts of the site are most sheltered vs most exposed to shading
+Important:
+- CEA irradiation values already include shading from the surroundings file. Do not apply another numerical shading penalty.
+- Use geometry to explain likely causes and design responses.
 
 ---
 
-## Scale Behaviour
+## What Python Should Calculate
 
-**District scale:**
-- Ranks all buildings by shading impact — from least to most constrained
-- Identifies which buildings are poor BIPV candidates due to context
-- Identifies which buildings have clear solar access and are strong BIPV candidates
-- Framing: "Buildings B1000, B1003, B1007 have the least shading impact and are your strongest BIPV investment opportunities. Buildings B1012 and B1014 are heavily constrained by neighbouring structures."
+Before calling the LLM, calculate a compact massing/shading summary:
 
-**Cluster scale:**
-- Focuses on mutual shading within the cluster — do the cluster's own buildings shade each other?
-- Flags north-facing surfaces of taller buildings casting shadows on shorter neighbours
-- Framing: "Within your cluster, B1005 casts significant shadow on B1004's south facade — consider height adjustment or spacing increase"
+- total opaque-surface irradiation per building
+- best and weakest surface per building
+- best facade per building
+- selected building height, footprint, and nearby surrounding heights
+- nearest/tall surrounding buildings
+- likely obstruction direction: north, south, east, west
+- whether a neighbour is within an approximate 2H influence distance
+- massing options that match the evidence
 
-**Building scale:**
-- Identifies which specific facades are most affected by neighbouring context
-- Early design mode: provides massing guidance — height, setback, orientation recommendations
-- Framing: "Your east facade receives X% less irradiation than expected — the adjacent 8-storey building to the east is the likely cause. Increasing setback by Y metres would recover approximately Z% of lost irradiation."
+Do not ask the LLM to infer these values from raw shapefile or CSV rows.
 
 ---
 
-## Early Design Mode
+## LLM Role
 
-When the architect is still defining massing (building heights, footprints, spacing not yet finalised), this skill switches to generative guidance mode:
+Use the computed metrics to propose a massing strategy.
 
-**District scale early design:**
-*"Based on the surrounding context, which plots on this site have the strongest solar access for BIPV investment?"*
-- Maps shadow-casting neighbours onto the site
-- Identifies zones of high and low solar exposure
-- Recommends which plots to prioritise for BIPV-intensive buildings
+The LLM should:
 
-**Building scale early design:**
-*"What massing decisions would minimise shading and maximise BIPV potential for this building?"*
-- Calculates minimum height to avoid being shaded by immediate neighbours
-- Calculates maximum height before the building starts shading itself (self-shading on lower floors)
-- Recommends optimal orientation relative to tallest neighbours
-- Provides specific setback distances for meaningful solar access improvement
+- name the massing strategy first
+- identify the dominant shading/context issue
+- say which building/surface should carry most BIPV
+- say which surfaces should be deprioritised
+- propose form changes when they improve solar access
+- distinguish current-condition advice from redesign advice
 
----
+Possible massing moves:
 
-## Benchmark
+- step the building down toward the south
+- increase setback from tall south/east/west neighbours
+- shift height or dense program volume northward
+- elongate the mass east-west to create a stronger south-facing BIPV plane
+- split one bulky volume into thinner bars to reduce self-shading
+- lower or terrace upper floors where they shade useful roof/facade areas
+- keep service cores or low-PV program on weakly irradiated sides
+- reserve the strongest roof plane as the baseline solar collector
+- rotate or reorient the mass if the current orientation suppresses the best facade
 
-**Shading impact thresholds:**
-- < 10% irradiation loss: low shading impact — context is not a significant constraint
-- 10–30% loss: moderate — worth considering in BIPV placement decisions
-- > 30% loss: high — context significantly constrains BIPV viability on affected surfaces
-
-**Critical shadow distance (approximate rule of thumb):**
-- For a neighbouring building of height H: significant shading occurs within a distance of 2H to the south (northern hemisphere) or 2H to the north (southern hemisphere)
-- The LLM reads the project latitude from the weather file to determine which hemisphere applies
+Do not give generic urban-design advice. Every recommendation must connect to a specific computed obstruction, surface, or irradiation result.
 
 ---
 
-## Output Modes
+## Output Expectations
 
-### If "Explain the numbers" selected:
-**What the LLM produces:**
-- Shading impact estimate per building (% irradiation loss vs expected)
-- Identification of main shadow-casting neighbours with their height and distance
-- Plain-language explanation of how CEA embeds shading into irradiation values
+**Key takeaway**
+- Start with the optimal massing move.
+- Name the surface/building that should carry the main BIPV area.
+- Mention the biggest shading constraint or obstruction direction.
+- End with one direct design action.
 
-**Visualization:** District map with shading impact overlay
-- Buildings colour-coded by shading impact: green (low) → amber (moderate) → red (high)
-- Shadow-casting neighbours highlighted
-- Source data shown below
+**Explain the numbers**
+- Explain the solar-access ranking.
+- For the selected building or cluster, explain best surface, weakest surface, and nearby obstruction context.
+- Explain how the geometry supports the shading interpretation.
+- Do not repeat that "CEA includes shading" unless it prevents a misunderstanding.
 
----
-
-### If "Key takeaway" selected:
-**What the LLM produces:**
-- One headline identifying the most and least shading-constrained buildings
-- One sentence on the dominant shadow source in the project
-- One sentence on early design implication
-
-**Visualization:** Ranked bar chart
-- Buildings ordered by shading impact (lowest to highest)
-- Makes BIPV investment priority immediately visible at district scale
+**Design implication**
+- Give a design recipe.
+- Include current-condition placement advice and redesign advice.
+- If the most solar-optimal solution requires changing the form, say so directly.
+- Deprioritise surfaces that are weak or likely shaded.
+- Use massing language: step, setback, shift, split, elongate, rotate, terrace, reserve.
 
 ---
 
-### If "Design implication" selected:
-**What the LLM produces:**
-- Clear BIPV investment priority list based on shading context
-- Early design massing recommendations (setback, height, orientation) where applicable
-- Specific buildings or surfaces to deprioritise for BIPV due to context constraints
-- Links to Surface Irradiation skill — combining shading context with irradiation data gives full picture
+## Redundancy Rules
 
-**Visualization:** Massing strategy diagram
-- Schematic showing shadow-casting relationships
-- Recommended setback distances and height relationships
-- Designed to be used directly in early design presentations
+- Do not restate surface irradiation rankings from Surface Irradiation unless they drive a massing decision.
+- Do not list every surrounding building unless it changes the design recommendation.
+- Do not describe charts.
+- Do not promise exact recovered kWh from a massing move unless a rerun simulation exists.
+- Do not invent trees, terraces, heritage constraints, or client goals.
 
 ---
 
-## Common Pitfalls
+## Example Logic
 
-- **Shading is already in irradiation values:** Never double-count shading. The irradiation values from CEA already include it. This skill explains and contextualises the shading impact — it does not apply additional reductions.
-- **Surroundings.shp may be incomplete:** The surroundings file contains only the buildings that were included when the CEA project was set up. If neighbouring buildings are missing, shading will be underestimated. Always flag this limitation.
-- **Trees and vegetation:** CEA's surroundings file contains buildings only — not trees or other vegetation. In contexts with significant tree cover, actual shading will be higher than calculated. The skill flags this when the location context suggests significant vegetation (e.g. suburban or park-adjacent sites).
-- **Early design estimates are approximate:** Massing recommendations in early design mode are based on geometric shadow calculations, not full radiation simulation. They should be used as design guidelines, validated by running CEA simulation once massing is defined.
+If a tall neighbour is close to the south:
+- "Step the mass down toward the south and keep the highest volume north. The south-side obstruction is within the 2H influence zone, so a taller southern edge would compound shading instead of creating useful BIPV area."
 
----
+If the roof dominates irradiation:
+- "Keep the roof plane large and unbroken. This is the primary BIPV collector; avoid fragmenting it with terraces, plant zones, or irregular roof volumes unless those constraints are intentional."
 
-## References
+If an east or west neighbour is close:
+- "Do not rely on that facade for morning/afternoon generation. Shift BIPV effort to the roof and the less obstructed facade, or increase the side setback before treating the facade as a main PV surface."
 
-- CEA4 surroundings geometry documentation
-- IDP 2025 Team 3: building orientation and massing study showing impact of neighbouring context on facade irradiation
-- IDP 2024 Team 2: solar fraction analysis revealing shading as key factor in low-performing facades
-- Interview — Interviewee A: iterative massing adjustments based on solar simulation results
-- Interview — Interviewee C: district-level analysis used to identify which buildings to prioritise for energy intervention
-
----
-
-## PV Simulation Config — Design Implications
-
-The app injects the following inferred parameters from the CEA output into your context:
-
-```
-panel-on-roof: YES/NO
-panel-on-wall: YES/NO
-Panel types simulated: PV1, PV2, ...
-```
-
-**Use these to proactively flag design implications:**
-
-- If `panel-on-wall: NO` → *"Your simulation excluded wall surfaces. Facade BIPV is often the most architecturally integrated option — consider enabling walls and re-running."*
-- If `panel-on-roof: NO` → *"Roof surfaces were excluded. These typically receive the highest irradiation and lowest shading — worth including for a complete picture."*
-- If only 1 panel type was simulated → *"Only PV1 was simulated. Running all 4 types would show whether a lower-embodied-carbon panel (e.g. CdTe) could justify more surfaces."*
+If one compact block performs poorly:
+- "Consider splitting the mass into thinner bars or stepping upper floors. The goal is not just to place panels differently, but to create more unshaded roof and facade exposure."
