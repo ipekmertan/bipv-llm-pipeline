@@ -537,13 +537,99 @@ def chart_economic(cea_data, selected_buildings, output_mode):
     return chart
 
 
+def chart_seasonal_patterns(cea_data, selected_buildings, output_mode):
+    """
+    Seasonal patterns — line chart, x=seasons, one line per surface.
+    """
+    df = cea_data["files"].get("solar_irradiation_seasonally.csv")
+    if df is None:
+        return None
+
+    period_col = _find_col(df, "period", "season", "Season", "Period")
+    surface_map = {
+        "Roof":       next((c for c in df.columns if "roof" in c.lower() and "window" not in c.lower()), None),
+        "South wall": next((c for c in df.columns if "south" in c.lower() and "window" not in c.lower()), None),
+        "East wall":  next((c for c in df.columns if "east" in c.lower() and "window" not in c.lower()), None),
+        "West wall":  next((c for c in df.columns if "west" in c.lower() and "window" not in c.lower()), None),
+        "North wall": next((c for c in df.columns if "north" in c.lower() and "window" not in c.lower()), None),
+    }
+    found = {k: v for k, v in surface_map.items() if v is not None}
+    if not found or period_col is None:
+        return None
+
+    rows = []
+    for _, row in df.iterrows():
+        for surface, col in found.items():
+            rows.append({
+                "Season": row[period_col],
+                "Surface": surface,
+                "Irradiation (kWh)": float(row[col]) if row[col] == row[col] else 0
+            })
+    df_long = pd.DataFrame(rows)
+
+    surface_order = [s for s in ["Roof", "South wall", "East wall", "West wall", "North wall"] if s in found]
+    color_range   = [C_PV, C_SURPLUS, "#e8b86d", "#a8d5b5", C_NEUTRAL][:len(surface_order)]
+
+    chart = alt.Chart(df_long).mark_line(point=True, strokeWidth=2).encode(
+        x=alt.X("Season:N", sort=["Spring", "Summer", "Autumn", "Winter"], title="Season"),
+        y=alt.Y("Irradiation (kWh):Q", title="Annual irradiation (kWh/yr)"),
+        color=alt.Color("Surface:N", scale=alt.Scale(domain=surface_order, range=color_range),
+                        legend=alt.Legend(title="Surface")),
+        tooltip=["Season", "Surface", alt.Tooltip("Irradiation (kWh):Q", format=",.0f", title="kWh/yr")]
+    ).properties(title="Solar irradiation by surface — seasonal patterns", height=260)
+    return chart
+
+
+def chart_daily_patterns(cea_data, selected_buildings, output_mode):
+    """
+    Daily patterns — line chart, x=hours, one line per surface.
+    """
+    df = cea_data["files"].get("solar_irradiation_daily.csv")
+    if df is None:
+        return None
+
+    hour_col = _find_col(df, "hour", "Hour", "time", "Time")
+    surface_map = {
+        "Roof":       next((c for c in df.columns if "roof" in c.lower() and "window" not in c.lower()), None),
+        "South wall": next((c for c in df.columns if "south" in c.lower() and "window" not in c.lower()), None),
+        "East wall":  next((c for c in df.columns if "east" in c.lower() and "window" not in c.lower()), None),
+        "West wall":  next((c for c in df.columns if "west" in c.lower() and "window" not in c.lower()), None),
+        "North wall": next((c for c in df.columns if "north" in c.lower() and "window" not in c.lower()), None),
+    }
+    found = {k: v for k, v in surface_map.items() if v is not None}
+    if not found or hour_col is None:
+        return None
+
+    rows = []
+    for _, row in df.iterrows():
+        for surface, col in found.items():
+            rows.append({
+                "Hour": int(row[hour_col]),
+                "Surface": surface,
+                "Irradiation (kWh)": float(row[col]) if row[col] == row[col] else 0
+            })
+    df_long = pd.DataFrame(rows)
+
+    surface_order = [s for s in ["Roof", "South wall", "East wall", "West wall", "North wall"] if s in found]
+    color_range   = [C_PV, C_SURPLUS, "#e8b86d", "#a8d5b5", C_NEUTRAL][:len(surface_order)]
+
+    chart = alt.Chart(df_long).mark_line(strokeWidth=2).encode(
+        x=alt.X("Hour:Q", title="Hour of day", axis=alt.Axis(tickMinStep=1)),
+        y=alt.Y("Irradiation (kWh):Q", title="Irradiation (kWh)"),
+        color=alt.Color("Surface:N", scale=alt.Scale(domain=surface_order, range=color_range),
+                        legend=alt.Legend(title="Surface")),
+        tooltip=["Hour", "Surface", alt.Tooltip("Irradiation (kWh):Q", format=",.1f")]
+    ).properties(title="Solar irradiation by surface — daily profile", height=260)
+    return chart
+
+
 # ── Skill → chart router ──────────────────────────────────────────────────────
 
 SKILL_CHART_MAP = {
     # Solar irradiation group
     "site-potential--solar-availability--surface-irradiation":              chart_solar_irradiation,
-    "site-potential--solar-availability--temporal-availability--seasonal-patterns": chart_solar_irradiation,
-    "site-potential--solar-availability--temporal-availability--daily-patterns":    chart_solar_irradiation,
+    "site-potential--solar-availability--temporal-availability--seasonal-patterns": chart_seasonal_patterns,
+    "site-potential--solar-availability--temporal-availability--daily-patterns":    chart_daily_patterns,
     "site-potential--envelope-suitability":                                 chart_solar_irradiation,
     "site-potential--massing-and-shading-strategy":                         chart_solar_irradiation,
     # Energy generation
