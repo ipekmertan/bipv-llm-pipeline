@@ -1098,7 +1098,7 @@ else:
                     SUBANALYSIS_TOOLTIPS = {
                         "Seasonal Patterns": "How does solar availability change across the seasons?",
                         "Daily Patterns": "How does solar availability vary across a typical day?",
-                        "Storage Strategy": "What storage and surface-mix strategy follows from daily and seasonal availability?",
+                        "Storage Necessity": "Does the project need short-term or seasonal storage, and what does that mean for BIPV design?",
                     }
                     for grandchild, grandchild_node in child_node["children"].items():
                         grandchild_tooltip = SUBANALYSIS_TOOLTIPS.get(grandchild, "")
