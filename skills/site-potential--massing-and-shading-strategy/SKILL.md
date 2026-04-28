@@ -14,6 +14,7 @@ This skill is not a surface-ranking skill. It is a form-making and shading strat
 
 - surrounding building geometry and height
 - project building geometry and height
+- project-to-project shading / mutual obstruction between buildings in the scheme
 - annual irradiation by building and opaque surface
 - likely obstruction directions
 - best solar-exposed surfaces
@@ -53,6 +54,8 @@ Before calling the LLM, calculate a compact massing/shading summary:
 - best facade per building
 - selected building height, footprint, and nearby surrounding heights
 - nearest/tall surrounding buildings
+- nearest/tall project buildings that may shade other project buildings
+- at building scale, compare the selected building against all other project buildings, not only external surroundings
 - likely obstruction direction: north, south, east, west
 - whether a neighbour is within an approximate 2H influence distance
 - massing options that match the evidence
@@ -69,6 +72,8 @@ The LLM should:
 
 - name the massing strategy first
 - identify the dominant shading/context issue
+- distinguish external obstructions from project-to-project mutual shading
+- at building scale, explicitly state whether the selected building is constrained by other project buildings
 - say which building/surface should carry most BIPV
 - say which surfaces should be deprioritised
 - propose form changes when they improve solar access
@@ -85,6 +90,12 @@ Possible massing moves:
 - keep service cores or low-PV program on weakly irradiated sides
 - reserve the strongest roof plane as the baseline solar collector
 - rotate or reorient the mass if the current orientation suppresses the best facade
+- subtractive massing: remove parts of a larger starting volume to improve solar exposure
+- courtyard massing: carve an internal void when it increases useful facade/daylight access
+- atrium massing: use a larger internal void when solar/daylight and program organisation benefit
+- stilted or lifted massing: lift part of the volume to improve porosity, daylight, or shadow relationships
+- solar-envelope massing: shape the volume around solar access constraints
+- split-bar massing: divide a bulky block into thinner bars to reduce self-shading
 
 Do not give generic urban-design advice. Every recommendation must connect to a specific computed obstruction, surface, or irradiation result.
 
@@ -108,6 +119,7 @@ Do not give generic urban-design advice. Every recommendation must connect to a 
 - Give a design recipe.
 - Include current-condition placement advice and redesign advice.
 - If the most solar-optimal solution requires changing the form, say so directly.
+- When substantial redesign is useful, name the relevant massing option so the architect can look it up, for example subtractive massing, courtyard massing, stilted massing, solar-envelope massing, split-bar massing, or terraced massing.
 - Deprioritise surfaces that are weak or likely shaded.
 - Use massing language: step, setback, shift, split, elongate, rotate, terrace, reserve.
 
@@ -128,6 +140,9 @@ Do not give generic urban-design advice. Every recommendation must connect to a 
 If a tall neighbour is close to the south:
 - "Step the mass down toward the south and keep the highest volume north. The south-side obstruction is within the 2H influence zone, so a taller southern edge would compound shading instead of creating useful BIPV area."
 
+If one project building shades another:
+- "Treat this as a massing coordination issue, not only a PV placement issue. Increase spacing, step the taller block, shift height northward, or split the volume so the lower building keeps useful roof and south-facade exposure."
+
 If the roof dominates irradiation:
 - "Keep the roof plane large and unbroken. This is the primary BIPV collector; avoid fragmenting it with terraces, plant zones, or irregular roof volumes unless those constraints are intentional."
 
@@ -136,3 +151,6 @@ If an east or west neighbour is close:
 
 If one compact block performs poorly:
 - "Consider splitting the mass into thinner bars or stepping upper floors. The goal is not just to place panels differently, but to create more unshaded roof and facade exposure."
+
+If the current mass is too bulky for solar access:
+- "Use subtractive massing as the redesign strategy: start from the allowed volume and remove/carve portions that block useful roof or facade exposure. Test courtyard, split-bar, or terraced variants before finalising the BIPV area."
