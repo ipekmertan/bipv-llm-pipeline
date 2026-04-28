@@ -322,6 +322,11 @@ def build_data_summary(cea_data, selected_buildings=None, scale="District"):
 
 
 COMPACT_SKILL_TASKS = {
+    "site-potential--solar-availability--temporal-availability--seasonal-patterns": (
+        "Interpret long-term seasonal solar availability. Focus on best and weakest seasons, "
+        "whether winter output remains meaningful, which surface is most seasonally stable, "
+        "and whether the project should expect seasonal grid dependency rather than building-scale seasonal storage."
+    ),
     "site-potential--solar-availability--temporal-availability--daily-patterns": (
         "Interpret the average 24-hour solar irradiation profile. Focus on when each surface produces, "
         "which facade supports morning or afternoon generation, and what this implies for BIPV placement "
@@ -357,6 +362,20 @@ def _surface_columns(df):
         "West wall": next((c for c in df.columns if "west" in c.lower() and "window" not in c.lower()), None),
         "North wall": next((c for c in df.columns if "north" in c.lower() and "window" not in c.lower()), None),
     }
+
+
+def _season_col(df):
+    if df is None:
+        return None
+    for exact in ["period", "season", "Season", "Period"]:
+        if exact in df.columns:
+            return exact
+    return next(
+        (c for c in df.columns
+         if ("season" in c.lower() or "period" in c.lower())
+         and "hour" not in c.lower()),
+        None
+    )
 
 
 def _format_number(value, unit="", decimals=0):
@@ -410,6 +429,128 @@ def compute_daily_pattern_metrics(cea_data):
         lines.append(
             f"- {surface}: peak at {peak_hour:02d}:00 with {_format_number(peak_value, ' kWh', 1)} average; "
             f"average-day total {_format_number(daily_total, ' kWh', 1)}; active window {active_window}."
+        )
+    return "\n".join(lines)
+
+
+def compute_seasonal_pattern_metrics(cea_data, selected_buildings=None, scale="District"):
+    df = None
+    source = None
+    if selected_buildings:
+        df = cea_data["files"].get("solar_irradiation_seasonally_buildings.csv")
+        source = "solar_irradiation_seasonally_buildings.csv"
+    if df is None:
+        df = cea_data["files"].get("solar_irradiation_seasonally.csv")
+        source = "solar_irradiation_seasonally.csv"
+    if df is None and not selected_buildings:
+        df = cea_data["files"].get("solar_irradiation_seasonally_buildings.csv")
+        source = "solar_irradiation_seasonally_buildings.csv"
+    if df is None:
+        return "Seasonal irradiation outputs are not available."
+
+    df = df.copy()
+    name_col = _find_metric_col(df, "name", "building")
+    if selected_buildings and name_col:
+        df = df[df[name_col].isin(selected_buildings)]
+    if df.empty:
+        return "Seasonal irradiation data is available, but no rows match the selected buildings."
+
+    period_col = _season_col(df)
+    if period_col is None:
+        return f"{source} is available, but no season/period column was found."
+
+    surfaces = {name: col for name, col in _surface_columns(df).items() if col}
+    if not surfaces:
+        return f"{source} is available, but no opaque surface irradiation columns were found."
+
+    season_order = ["Spring", "Summer", "Autumn", "Winter"]
+    df["_season"] = df[period_col].astype(str).str.strip().str.title()
+    season_totals = df.groupby("_season")[[col for col in surfaces.values()]].sum()
+    season_totals["__total__"] = season_totals.sum(axis=1)
+    season_totals = season_totals.reindex(season_order, fill_value=0)
+
+    total_by_season = season_totals["__total__"]
+    best_season = str(total_by_season.idxmax())
+    weakest_season = str(total_by_season.idxmin())
+    best_value = float(total_by_season.max())
+    weakest_value = float(total_by_season.min())
+    annual_total = float(total_by_season.sum())
+
+    meaningful_floor = max(annual_total * 0.01, 1.0)
+    if weakest_value <= meaningful_floor:
+        ratio_text = (
+            f"not meaningful because {weakest_season} is near zero "
+            f"({_format_number(weakest_value, ' kWh')}); treat as very high seasonal imbalance"
+        )
+        imbalance_class = "very high"
+    else:
+        ratio = best_value / weakest_value
+        ratio_text = f"{ratio:.1f}:1 ({best_season} vs {weakest_season})"
+        if ratio < 2:
+            imbalance_class = "low"
+        elif ratio <= 4:
+            imbalance_class = "moderate"
+        else:
+            imbalance_class = "high"
+
+    stable_rows = []
+    for surface, col in surfaces.items():
+        values = season_totals[col].astype(float)
+        surface_total = float(values.sum())
+        surface_min = float(values.min())
+        surface_max = float(values.max())
+        if surface_total <= 0:
+            continue
+        if surface_min <= max(surface_total * 0.01, 1.0):
+            stability_label = "near-zero weak season"
+            stability_score = None
+        else:
+            stability_score = surface_max / surface_min
+            stability_label = f"{stability_score:.1f}:1 max/min"
+        stable_rows.append({
+            "surface": surface,
+            "total": surface_total,
+            "min": surface_min,
+            "max": surface_max,
+            "stability_score": stability_score,
+            "stability_label": stability_label,
+        })
+
+    surfaces_with_scores = [row for row in stable_rows if row["stability_score"] is not None]
+    if surfaces_with_scores:
+        most_stable = min(surfaces_with_scores, key=lambda row: row["stability_score"])
+        stable_text = f"{most_stable['surface']} ({most_stable['stability_label']})"
+    elif stable_rows:
+        most_stable = max(stable_rows, key=lambda row: row["min"])
+        stable_text = (
+            f"{most_stable['surface']} has the strongest weak-season output "
+            f"({_format_number(most_stable['min'], ' kWh')}), but all available surfaces have a near-zero weak season"
+        )
+    else:
+        stable_text = "not available because all surface totals are zero."
+
+    lines = [
+        f"Source: {source}",
+        f"Scale: {scale}",
+        "Metric: seasonal irradiation totals by opaque surface. Window irradiation is excluded.",
+        f"Total seasonal irradiation across opaque surfaces: {_format_number(annual_total, ' kWh/year')}.",
+        f"Best season: {best_season} with {_format_number(best_value, ' kWh')}.",
+        f"Weakest season: {weakest_season} with {_format_number(weakest_value, ' kWh')}.",
+        f"Seasonal imbalance ratio: {ratio_text}.",
+        f"Seasonal imbalance class: {imbalance_class}.",
+        f"Most stable surface: {stable_text}.",
+        "Do not print infinity. If the weak season is zero or near-zero, state that the ratio is not meaningful and classify the imbalance as very high.",
+        "Seasonal design meaning: building-scale batteries should not be presented as the normal solution for seasonal mismatch; frame this as grid dependency, district-scale storage, thermal storage, or lower winter self-sufficiency unless a specific seasonal storage system is provided.",
+        "Season totals:",
+    ]
+    for season in season_order:
+        lines.append(f"- {season}: {_format_number(float(total_by_season.loc[season]), ' kWh')}.")
+    lines.append("Surface totals and stability:")
+    for row in sorted(stable_rows, key=lambda item: item["total"], reverse=True):
+        lines.append(
+            f"- {row['surface']}: annual {_format_number(row['total'], ' kWh/year')}; "
+            f"seasonal range {_format_number(row['min'], ' kWh')} to {_format_number(row['max'], ' kWh')}; "
+            f"stability {row['stability_label']}."
         )
     return "\n".join(lines)
 
@@ -541,6 +682,8 @@ def compute_panel_tradeoff_metrics(cea_data, selected_buildings=None):
 
 
 def compute_compact_metrics(skill_id, cea_data, selected_buildings=None, scale="District"):
+    if skill_id == "site-potential--solar-availability--temporal-availability--seasonal-patterns":
+        return compute_seasonal_pattern_metrics(cea_data, selected_buildings, scale)
     if skill_id == "site-potential--solar-availability--temporal-availability--daily-patterns":
         return compute_daily_pattern_metrics(cea_data)
     if skill_id == "site-potential--solar-availability--surface-irradiation":
@@ -1297,3 +1440,4 @@ else:
                     response = call_llm(system_prompt, recent_history)
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
                 st.rerun()
+
