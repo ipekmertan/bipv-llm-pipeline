@@ -935,6 +935,16 @@ def _direction_from_to(source, target):
     return "north" if dy > 0 else "south"
 
 
+def _obstruction_level(score):
+    if score >= 4:
+        return "very high"
+    if score >= 2:
+        return "high"
+    if score >= 1:
+        return "moderate"
+    return "low"
+
+
 def compute_massing_shading_metrics(cea_data, selected_buildings=None, scale="District"):
     files = cea_data.get("files", {})
     irr_df = files.get("solar_irradiation_annually_buildings.csv")
@@ -1037,7 +1047,7 @@ def compute_massing_shading_metrics(cea_data, selected_buildings=None, scale="Di
             for source_type, source_df, source_name_col, source_height_col in neighbour_sources:
                 for _, neighbour in source_df.iterrows():
                     nname = str(neighbour[source_name_col]) if source_name_col else source_type
-                    if source_type == "project building" and nname == bname:
+                    if nname == bname:
                         continue
                     nheight = _height_value(neighbour, source_height_col) or 0
                     distance = _bbox_gap(building, neighbour)
@@ -1112,19 +1122,20 @@ def compute_massing_shading_metrics(cea_data, selected_buildings=None, scale="Di
         lines.append("Ranked obstruction risk by side (geometry screening, not exact kWh loss):")
         for c in sorted(obstruction_rankings, key=lambda item: item["risk_score"], reverse=True)[:12]:
             source_label = "project" if c["source_type"] == "project building" else "surrounding"
+            level = _obstruction_level(c["risk_score"])
             lines.append(
                 f"- {c['target']} {c['direction']} side: {source_label} building {c['name']}; "
-                f"risk score {c['risk_score']:.2f}; height {_format_number(c['height'], ' m', 1)}; "
+                f"{level} obstruction risk; height {_format_number(c['height'], ' m', 1)}; "
                 f"gap {_format_number(c['distance'], ' m', 1)}; 2H/gap ratio {c['influence_ratio']:.2f}."
             )
-        lines.append("Use the ranked obstruction list to say which side is most constrained and by which building. Do not call the score a simulated shading loss.")
+        lines.append("Use the ranked obstruction list to say which side is most constrained and by which building. Do not mention the internal numeric risk score and do not call this a simulated shading loss.")
 
     lines.append("Massing strategy options to consider:")
     lines.append("- Preserve or expand the highest-irradiation roof plane as the baseline solar collector.")
-    lines.append("- Step down massing toward the south where southern obstructions or self-shading are likely.")
+    lines.append("- Step down massing toward the south where southern obstructions or project-to-project obstruction are likely.")
     lines.append("- Increase setbacks from tall south/east/west neighbours where the gap is within roughly 2x neighbour height.")
     lines.append("- Shift height or dense program volume toward the north side of the plot to keep southern roof/facade exposure clearer.")
-    lines.append("- Elongate the building east-west when the goal is a larger south-facing BIPV facade; split bulky volumes if that reduces self-shading.")
+    lines.append("- Elongate the building east-west when the goal is a larger south-facing BIPV facade; split bulky volumes if that reduces project-to-project obstruction or over-deep massing.")
     lines.append("- If a facade is persistently weak, deprioritise it for PV and use it for windows, access, services, or conventional cladding.")
     lines.append("- If the optimal solar form differs strongly from the current massing, state that the massing itself should be renegotiated rather than merely placing panels on poor surfaces.")
     lines.append("Performance-based massing option names to suggest when relevant:")
@@ -1133,7 +1144,7 @@ def compute_massing_shading_metrics(cea_data, selected_buildings=None, scale="Di
     lines.append("- Atrium massing: use a taller internal void when solar/daylight access and program organisation both benefit.")
     lines.append("- Stilted / lifted massing: lift part of the volume when ground-level porosity, daylight, or overshadowing reduction matters.")
     lines.append("- Solar-envelope massing: shape the allowed volume so it preserves solar access for itself or neighbours.")
-    lines.append("- Split-bar massing: divide a bulky volume into thinner bars to reduce self-shading and expose more roof/facade surface.")
+    lines.append("- Split-bar massing: divide a bulky volume into thinner bars to reduce project-to-project obstruction or over-deep massing and expose more roof/facade surface.")
     lines.append("- Terraced / stepped massing: reduce height toward the solar-critical side and use upper setbacks as solar roof planes.")
 
     return "\n".join(lines)
@@ -1287,42 +1298,43 @@ def render_massing_strategy_sketches(text, skill_id, output_mode):
             "keys": ["step", "terrace"],
             "title": "Stepped / Terraced Massing",
             "note": "Lower the solar-critical edge and use upper setbacks as exposed PV roof planes.",
-            "blocks": [(0, 0, 0, 78, 50, 82), (72, 0, 0, 78, 50, 54), (144, 0, 0, 78, 50, 30)],
+            "blocks": [(48, 78, 58, 34, 86), (104, 88, 58, 34, 58), (160, 98, 58, 34, 34)],
             "sun": "south sun",
         },
         {
             "keys": ["split", "bar"],
             "title": "Split-Bar Massing",
-            "note": "Break a bulky block into thinner bars to reduce self-shading and expose more facade/roof area.",
-            "blocks": [(0, 0, 0, 68, 46, 68), (128, 0, 0, 68, 46, 68)],
+            "note": "Break a bulky block into thinner bars to reduce project-to-project obstruction and expose more facade/roof area.",
+            "blocks": [(46, 96, 62, 34, 64), (166, 96, 62, 34, 64)],
             "sun": "gap for light",
         },
         {
             "keys": ["courtyard", "void", "carve", "subtractive"],
             "title": "Subtractive / Courtyard Massing",
             "note": "Start from the allowed volume, then carve a void where it improves solar and daylight access.",
-            "blocks": [(0, 0, 0, 56, 44, 62), (56, 0, 0, 56, 44, 62), (112, 0, 0, 56, 44, 62), (0, 68, 0, 56, 44, 62), (112, 68, 0, 56, 44, 62)],
+            "blocks": [(46, 76, 48, 30, 58), (94, 76, 48, 30, 58), (142, 76, 48, 30, 58), (46, 126, 48, 30, 58), (142, 126, 48, 30, 58)],
             "sun": "carved void",
         },
         {
             "keys": ["setback", "spacing", "distance"],
             "title": "Increase Setback",
             "note": "Open distance from a tall obstruction before treating the shaded facade as a main PV surface.",
-            "blocks": [(0, 0, 0, 62, 48, 86), (154, 0, 0, 68, 48, 50)],
+            "blocks": [(50, 90, 56, 34, 88), (178, 104, 60, 34, 48)],
+            "gap": True,
             "sun": "setback",
         },
         {
             "keys": ["north", "shift height", "shift the height", "dense program"],
             "title": "Shift Height Northward",
             "note": "Keep taller program volume away from the solar-critical south edge.",
-            "blocks": [(10, 0, 0, 78, 50, 36), (100, 0, 0, 78, 50, 82)],
+            "blocks": [(66, 104, 62, 34, 34), (150, 84, 62, 34, 88)],
             "sun": "lower south edge",
         },
         {
             "keys": ["stilt", "lift"],
             "title": "Lifted / Stilted Massing",
             "note": "Lift part of the volume to reduce ground-level obstruction and improve porosity/daylight.",
-            "blocks": [(32, 0, 42, 142, 48, 42)],
+            "blocks": [(74, 72, 124, 40, 42)],
             "stilts": True,
             "sun": "open ground",
         },
@@ -1336,28 +1348,54 @@ def render_massing_strategy_sketches(text, skill_id, output_mode):
         return
     selected = selected[:3]
 
-    def block_html(block):
-        x, y, z, w, d, h = block
-        return (
-            f'<div class="iso-block" style="--x:{x}px;--y:{y}px;--z:{z}px;'
-            f'--w:{w}px;--d:{d}px;--h:{h}px;">'
-            '<span class="face top"></span><span class="face front"></span><span class="face side"></span>'
-            '</div>'
-        )
+    def cuboid_svg(block):
+        x, y, w, d, h = block
+        skew = d * 0.5
+        a = (x, y)
+        b = (x + w, y - skew)
+        c = (x + w + d, y)
+        dpt = (x + d, y + skew)
+        a2 = (a[0], a[1] + h)
+        b2 = (b[0], b[1] + h)
+        c2 = (c[0], c[1] + h)
+        d2 = (dpt[0], dpt[1] + h)
+
+        def pts(*items):
+            return " ".join(f"{px:.1f},{py:.1f}" for px, py in items)
+
+        return f"""
+          <polygon points="{pts(a, b, c, dpt)}" fill="#d8bf84" stroke="rgba(45,49,66,.24)" stroke-width="1"/>
+          <polygon points="{pts(dpt, c, c2, d2)}" fill="#8fbf9f" stroke="rgba(45,49,66,.22)" stroke-width="1"/>
+          <polygon points="{pts(a, dpt, d2, a2)}" fill="#b9a06b" stroke="rgba(45,49,66,.22)" stroke-width="1"/>
+          <polygon points="{pts(a, b, b2, a2)}" fill="#c6ad75" stroke="rgba(45,49,66,.16)" stroke-width="1"/>
+        """
 
     cards = []
     for strategy in selected:
-        blocks = "".join(block_html(b) for b in strategy["blocks"])
+        blocks = "".join(cuboid_svg(b) for b in strategy["blocks"])
         stilts = ""
         if strategy.get("stilts"):
-            for sx in [48, 168]:
-                stilts += f'<div class="stilt" style="--sx:{sx}px;"></div>'
+            stilts = """
+              <line x1="92" y1="126" x2="92" y2="176" stroke="#2d3142" stroke-width="5"/>
+              <line x1="192" y1="102" x2="192" y2="152" stroke="#2d3142" stroke-width="5"/>
+            """
+        gap = ""
+        if strategy.get("gap"):
+            gap = """
+              <line x1="118" y1="156" x2="174" y2="156" stroke="#2d3142" stroke-width="1.6" stroke-dasharray="4 4"/>
+              <path d="M118 156 l8 -5 m-8 5 l8 5 M174 156 l-8 -5 m8 5 l-8 5" stroke="#2d3142" stroke-width="1.6" fill="none"/>
+              <text x="132" y="148" font-size="10" fill="#5f6675">gap</text>
+            """
         cards.append(f"""
         <section class="sketch-card">
           <div class="sketch-title">{strategy['title']}</div>
           <div class="scene-wrap">
             <div class="sun-arrow">{strategy['sun']} →</div>
-            <div class="iso-scene">{blocks}{stilts}</div>
+            <svg class="massing-svg" viewBox="0 0 300 220" role="img" aria-label="{strategy['title']} schematic">
+              {blocks}
+              {stilts}
+              {gap}
+            </svg>
           </div>
           <div class="sketch-note">{strategy['note']}</div>
         </section>
@@ -1377,7 +1415,7 @@ def render_massing_strategy_sketches(text, skill_id, output_mode):
         background:#fffdf8;
         border-radius:8px;
         padding:12px 12px 10px 12px;
-        min-height:300px;
+        min-height:285px;
       }}
       .sketch-title {{
         color:#2d3142;
@@ -1386,9 +1424,9 @@ def render_massing_strategy_sketches(text, skill_id, output_mode):
         margin-bottom:4px;
       }}
       .scene-wrap {{
-        height:220px;
+        height:205px;
         position:relative;
-        overflow:hidden;
+        overflow:visible;
       }}
       .sun-arrow {{
         position:absolute;
@@ -1400,74 +1438,14 @@ def render_massing_strategy_sketches(text, skill_id, output_mode):
         text-transform:uppercase;
         letter-spacing:.04em;
       }}
-      .iso-scene {{
+      .massing-svg {{
         position:absolute;
         left:50%;
-        top:142px;
-        width:300px;
-        height:220px;
-        transform:translateX(-50%) scale(.92) rotateX(58deg) rotateZ(-38deg);
-        transform-style:preserve-3d;
-      }}
-      .iso-block {{
-        position:absolute;
-        left:var(--x);
-        top:var(--y);
-        width:var(--w);
-        height:var(--d);
-        transform:translateZ(var(--z));
-        transform-style:preserve-3d;
-        background:transparent;
-      }}
-      .iso-block .face {{
-        position:absolute;
-        display:block;
-        box-sizing:border-box;
-        border:1px solid rgba(45,49,66,.18);
-      }}
-      .iso-block .top {{
-        left:0;
-        top:0;
+        top:28px;
+        transform:translateX(-50%);
         width:100%;
-        height:100%;
-        background:#d8bf84;
-      }}
-      .iso-block .front {{
-        left:0;
-        top:100%;
-        width:100%;
-        height:var(--h);
-        background:#b9a06b;
-        transform-origin:top;
-        transform:rotateX(-90deg);
-      }}
-      .iso-block .side {{
-        position:absolute;
-        right:0;
-        top:0;
-        width:var(--h);
-        height:100%;
-        background:#8fbf9f;
-        transform-origin:right;
-        transform:rotateY(90deg);
-      }}
-      .stilt {{
-        position:absolute;
-        left:var(--sx);
-        top:18px;
-        width:8px;
-        height:8px;
-        background:#2d3142;
-        transform:translateZ(0);
-      }}
-      .stilt:before {{
-        content:"";
-        position:absolute;
-        width:8px;
-        height:54px;
-        background:#2d3142;
-        transform-origin:top;
-        transform:rotateX(-90deg);
+        max-width:330px;
+        height:190px;
       }}
       .sketch-note {{
         color:#5f6675;
@@ -1480,7 +1458,7 @@ def render_massing_strategy_sketches(text, skill_id, output_mode):
     </style>
     <div class="sketch-grid">{''.join(cards)}</div>
     """
-    components.html(html, height=380 if len(cards) <= 3 else 720, scrolling=False)
+    components.html(html, height=350 if len(cards) <= 3 else 680, scrolling=False)
 
 
 def build_system_prompt(skill_md, cea_summary, output_mode, scale, selected_buildings=None, skill_id=None, cea_data=None):
@@ -2188,8 +2166,8 @@ else:
                         )
                         if _chart is not None:
                             st.altair_chart(_chart, use_container_width=True)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        st.warning(f"Chart could not render: {e}")
 
         if st.session_state.chat_history:
             st.markdown("---")
