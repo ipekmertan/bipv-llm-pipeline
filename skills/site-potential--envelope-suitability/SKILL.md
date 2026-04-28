@@ -1,189 +1,147 @@
 ---
 name: site-potential--envelope-suitability
-description: Use when the architect wants to understand how much of their building envelope is physically available for BIPV installation. Reads CEA geometry and envelope property files to calculate usable opaque surface area, accounting for glazing, exclusion zones, and surface type. Also works in early design mode when window ratios are not yet defined.
-intent: Translate building geometry and envelope properties into a clear picture of how much surface area is actually installable for BIPV — and in early design stages, tell the architect the maximum glazing they can have while still making BIPV viable.
+description: Use when the architect needs to know which envelope surfaces are actually suitable for BIPV after combining solar potential, surface availability, WWR, accessibility, visibility, and design trade-offs.
+intent: Produce a surface-by-surface suitability matrix and translate it into BIPV integration opportunities and conflict flags.
 type: component
-position_in_tree: "Goal → Site Potential → Envelope Suitability"
+position_in_tree: "Goal -> Site Potential -> Envelope Suitability"
 ---
 
 ## Purpose
 
-Answer the question: **"How much of my building envelope is physically available for BIPV installation?"**
+Answer the question: **"Which parts of the envelope are suitable for BIPV, and what trade-offs should the architect notice?"**
 
-This skill reads building geometry and envelope property data from CEA4 to calculate the total opaque surface area available for BIPV across roof and facade orientations. It accounts for glazing (windows), and flags surfaces that are typically excluded from BIPV consideration.
+This is a synthesis node. It must not only rank irradiation. It combines:
 
-**This skill operates in two modes:**
+- solar potential from irradiation outputs
+- surface area or simulated PV area when available
+- WWR / facade continuity from `envelope.csv`
+- accessibility for installation and maintenance
+- visibility / architectural prominence
+- conflict flags where one criterion pushes against another
 
-**Mode A — Defined envelope** (architect has already set window-to-wall ratios in CEA):
-Calculates actual available opaque area per surface using the defined WWR values.
-
-**Mode B — Early design stage** (window-to-wall ratios not yet defined):
-Flips the question — calculates the maximum WWR the architect can apply to each facade while still keeping enough opaque area to justify BIPV installation. Gives the architect a design constraint to work with before committing to facade decisions.
-
----
-
-## File Source
-
-This skill reads from the uploaded CEA project zip. The app finds the relevant files automatically by filename — no manual file selection needed.
-
-**Location context** is taken from the project's weather file (`.epw`) found inside the zip.
-## Data Sources
-
-| `building-properties/envelope.csv` | Window-to-wall ratio per orientation per building (`wwr_north`, `wwr_south`, `wwr_east`, `wwr_west`) |
-
-**Key columns from `envelope.csv`:**
-- `name` — building identifier
-- `wwr_east`, `wwr_north`, `wwr_south`, `wwr_west` — window-to-wall ratio per facade orientation (0–1)
+The goal is to help the architect notice design opportunities and negotiation points that are easy to miss when looking only at radiation.
 
 ---
 
-## Calculations
+## Data Used
 
-### Mode A — Defined envelope
+Primary:
+- `solar_irradiation_annually.csv`
+- `solar_irradiation_annually_buildings.csv`
+- `envelope.csv`
+- `PV_PV*_total_buildings.csv` when simulated PV area is available
 
-**Step 1 — Calculate total facade area per orientation:**
-```
-facade_area_south = building_perimeter_south × building_height
-(derived from zone.shp geometry)
-```
+Useful columns:
+- `irradiation_roof[kWh]`
+- `irradiation_wall_south[kWh]`
+- `irradiation_wall_east[kWh]`
+- `irradiation_wall_west[kWh]`
+- `irradiation_wall_north[kWh]`
+- `wwr_south`, `wwr_east`, `wwr_west`, `wwr_north`
+- `PV_roofs_top_m2`
+- `PV_walls_south_m2`, `PV_walls_east_m2`, `PV_walls_west_m2`, `PV_walls_north_m2`
 
-**Step 2 — Calculate opaque area per facade:**
-```
-opaque_area_south = facade_area_south × (1 - wwr_south)
-```
-
-**Step 3 — Calculate roof area:**
-```
-roof_area = building_footprint_area
-(from zone.shp)
-```
-
-**Step 4 — Calculate total installable area:**
-```
-total_installable = roof_area + sum(opaque_area per facade orientation)
-```
-
-**Step 5 — Calculate envelope installable fraction:**
-```
-installable_fraction = total_installable ÷ total_envelope_area
-```
+Ignored:
+- window irradiation columns for BIPV recommendations
+- generic facade advice not connected to the computed matrix
 
 ---
 
-### Mode B — Early design stage
+## What Python Should Calculate
 
-**Step 1 — Calculate minimum opaque area needed to justify BIPV:**
-Using the radiation viability threshold (800 kWh/m²/year for facades) and a minimum viable panel size assumption (10m² minimum installation), calculate the minimum opaque area per facade that makes BIPV worthwhile.
+Before calling the LLM, calculate a compact suitability matrix:
 
-**Step 2 — Calculate maximum WWR:**
-```
-max_wwr = 1 - (minimum_opaque_area ÷ total_facade_area)
-```
+- annual irradiation per opaque surface
+- share of total opaque-surface irradiation
+- WWR per facade, if available
+- simulated PV area per surface, if available
+- accessibility class:
+  - roof: usually reachable, but may conflict with access paths or equipment
+  - facade: requires vertical access and maintenance planning
+- visibility class:
+  - roof: usually low visibility / lower aesthetic constraint
+  - facades: high visibility / architectural expression issue
+- suitability class:
+  - HIGH: strong solar potential plus usable/continuous surface
+  - MEDIUM: useful but selective or constrained
+  - LOW: weak solar potential, fragmented area, or low simulated area
+- conflict flags visible in the data
 
-**Step 3 — Output as design constraint:**
-For each facade orientation: *"Your south facade can accommodate up to X% glazing and still support a meaningful BIPV installation."*
-
-This gives the architect a concrete number to work with before finalising facade design.
-
----
-
-## Scale Behaviour
-
-**District scale:**
-- Aggregates installable area across all buildings
-- Framing: "Across the district, X m² of envelope is available for BIPV — Y% of the total envelope area"
-
-**Cluster scale:**
-- Compares installable fraction per building within the cluster
-- Identifies which buildings have the most available envelope
-- Framing: "Building B1000 has the highest installable fraction at X% — Building B1005 is most constrained at Y%"
-
-**Building scale:**
-- Shows installable area per surface for that specific building
-- Framing: "For building B1000: roof = X m², south wall = Y m², east wall = Z m² available for BIPV"
+Do not ask the LLM to calculate these from raw CSV rows.
 
 ---
 
-## Benchmark
+## LLM Role
 
-**Installable fraction interpretation:**
-- > 60%: high availability — most of the envelope is usable
-- 30–60%: moderate — selective placement, focus on priority surfaces
-- < 30%: constrained — roof-only strategy likely most viable
+Use the computed matrix to interpret trade-offs.
 
-**Typical WWR ranges in architecture:**
-- Residential: 20–40% WWR typical
-- Office / commercial: 40–70% WWR typical
-- High glazing (curtain wall): > 70% — very limited opaque area for facade BIPV
+The LLM should:
 
-**Maximum WWR for viable facade BIPV:**
-As a general rule, facades with WWR > 70% rarely have enough opaque area to justify BIPV installation. The skill flags this threshold clearly in Mode B output.
+- state which surfaces are HIGH / MEDIUM / LOW suitability
+- identify "free" surfaces: good potential with low visibility, usually roof
+- identify architectural opportunity surfaces: good potential with high visibility, usually prominent facades
+- for high-visibility suitable facades, name relevant BIPV product/design options the architect can look up
+- flag conflicts:
+  - high solar potential but zero simulated PV area
+  - high WWR limiting facade integration
+  - high-potential roof that may need coordination with roof access/equipment if that is visible in the data
+- avoid repeating the same point in different wording
+- avoid generic claims like "south is best" unless the computed data supports it
 
----
-
-## Surfaces Typically Excluded from BIPV
-
-The skill flags the following surface types as typically non-installable, even if they are opaque:
-- Balconies and railings
-- Rooftop equipment zones (HVAC, technical units)
-- Access and maintenance zones
-- Highly fragmented or irregular surfaces
-- Surfaces below 2m height (ground level — accessibility and safety)
-
-These exclusions are applied as a percentage reduction to the calculated opaque area, based on standard BIPV practice assumptions. The LLM notes these assumptions clearly and flags that actual exclusions depend on the specific building design.
+The LLM must not invent design-intent conflicts. If rooftop terrace, heritage, equipment zones, facade articulation, or client priorities are not provided, do not pretend they are known.
 
 ---
 
-## Output Modes
+## Output Expectations
 
-### If "Explain the numbers" selected:
-**What the LLM produces:**
-- Total installable area broken down by surface (roof, south wall, east wall, west wall, north wall)
-- WWR values per facade and what they mean for available area
-- Installable fraction of total envelope
-- Mode B: maximum WWR per facade as a design constraint with explanation
+**Key takeaway**
+- Start with the main suitability answer.
+- Name the best surface and why, using one or two decisive numbers.
+- Mention the main trade-off only if it changes the design decision.
+- End with the BIPV move: full integration, selective integration, roof-first, facade-feature, or avoid PV.
 
-**Visualization:** Stacked bar chart per building or surface
-- Shows total facade area split into: glazed (windows) / installable opaque / excluded opaque
-- Makes the available fraction immediately visible
-- Source data shown below
+**Explain the numbers**
+- Give the surface-by-surface matrix.
+- For each surface, include: irradiation, WWR or simulated area if available, suitability class, and the reason for that class.
+- Explain only numbers that affect the suitability decision.
+- Do not repeat the same orientation logic after every row.
 
----
-
-### If "Key takeaway" selected:
-**What the LLM produces:**
-- One headline: "X m² of your envelope is available for BIPV — concentrated on [surface]"
-- Mode B: "To keep your south facade BIPV-viable, limit glazing to X%"
-- One sentence on which surface offers the most opportunity
-
-**Visualization:** Donut chart
-- Segments: Roof / South wall / East wall / West wall / North wall / Excluded
-- Shows relative contribution of each surface to total installable area
+**Design implication**
+- Turn the matrix into design actions.
+- Distinguish:
+  - low-visibility technical opportunity
+  - high-visibility architectural opportunity, with searchable BIPV option names
+  - surfaces better left as conventional cladding
+- Include conflict flags as negotiation points, not failures.
+- If data is missing, say exactly what is missing and avoid filling it with invented project facts.
+- When a visible facade has HIGH or MEDIUM suitability, give 2-4 relevant BIPV option names from the computed metrics. Do not list every option if only one or two fit the surface.
 
 ---
 
-### If "Design implication" selected:
-**What the LLM produces:**
-- Concrete recommendation on where to focus BIPV installation
-- Mode B: Specific WWR limits per facade as design guidelines
-- If installable fraction is low: recommendation to prioritise roof and reconsider facade glazing strategy
-- If installable fraction is high: confirmation that a comprehensive BIPV strategy is feasible
-- Links to Surface Irradiation skill — combining available area with radiation data gives full picture of BIPV potential
+## Tone and Redundancy Rules
 
-**Visualization:** Envelope breakdown diagram
-- Building elevation diagram showing: installable / glazed / excluded zones per facade
-- Simple, schematic — designed to inform early design decisions
+- Be concise but not shallow.
+- Do not add introductions like "this analysis considers..." when the answer can start with the result.
+- Do not restate the same surface ranking in every paragraph.
+- Do not describe charts.
+- Do not include methodology unless the user selected Explain the numbers and the method affects interpretation.
+- Use direct architectural language: "use", "avoid", "reserve", "treat as", "coordinate with".
 
 ---
 
-## Common Pitfalls
+## Example Logic
 
-- **WWR is per orientation, not per building:** Each facade direction has its own WWR. A building with high south glazing may still have very usable north and east facades for BIPV — always break down by orientation.
-- **Footprint ≠ roof area:** Some roofs have equipment, access zones, or irregular shapes that reduce installable area. The skill applies a standard 15% reduction to roof area to account for this unless more specific data is available.
-- **Mode B is an estimate:** The maximum WWR calculation in early design mode is based on assumptions about minimum viable panel size. It should be used as a design guideline, not a precise limit. The skill always states this clearly.
-- **Surroundings affect usable area:** Shading from neighbouring buildings (available in `surroundings.shp`) may further reduce the effective usable area. This skill does not account for shading — that is handled by the Contextual Shading skill.
+If the roof has high irradiation and low visibility:
+- "Roof: HIGH suitability. It is the least aesthetically constrained BIPV surface, so use it as the baseline PV area before negotiating facade expression."
 
----
+If the south facade has high irradiation and high visibility:
+- "South wall: HIGH suitability, but visually prominent. Treat BIPV here as facade design, not hidden infrastructure. Look up opaque BIPV facade cladding, colored or patterned BIPV modules, or PV shading devices depending on the facade language."
+
+If the north facade has low irradiation and fragmented/limited area:
+- "North wall: LOW suitability. Use conventional cladding unless there is a non-energy reason to use BIPV."
+
+If the data shows a conflict:
+- "Conflict: the south wall has meaningful irradiation but zero simulated PV area. Check whether facade PV was excluded from the simulation before treating the facade as unsuitable."
 
 ## References
 
