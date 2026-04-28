@@ -125,12 +125,20 @@ def chart_massing_shading(cea_data, selected_buildings, output_mode):
         zone["focus"] = True
     surroundings["focus"] = False
 
-    plot_df = pd.concat([
-        zone[["centroid_x", "centroid_y", "height_m", "type", "label", "focus"]],
-        surroundings[["centroid_x", "centroid_y", "height_m", "type", "label", "focus"]],
-    ], ignore_index=True)
-
     focus_zone = zone[zone["focus"]]
+    if focus_zone.empty:
+        focus_zone = zone
+
+    buffer_m = 180 if selected_buildings else 120
+    minx = float(focus_zone["minx"].min()) - buffer_m
+    maxx = float(focus_zone["maxx"].max()) + buffer_m
+    miny = float(focus_zone["miny"].min()) - buffer_m
+    maxy = float(focus_zone["maxy"].max()) + buffer_m
+    surroundings = surroundings[
+        (surroundings["centroid_x"] >= minx) & (surroundings["centroid_x"] <= maxx) &
+        (surroundings["centroid_y"] >= miny) & (surroundings["centroid_y"] <= maxy)
+    ].copy()
+
     links = []
     if not focus_zone.empty:
         for _, building in focus_zone.iterrows():
@@ -154,9 +162,31 @@ def chart_massing_shading(cea_data, selected_buildings, output_mode):
                     })
             links.extend(sorted(candidates, key=lambda item: item["distance_m"])[:5])
 
+    linked_names = {item["source"] for item in links}
+    if linked_names:
+        surroundings = surroundings[
+            surroundings["label"].isin(linked_names) |
+            (surroundings["height_m"] >= surroundings["height_m"].quantile(0.75))
+        ].copy()
+    elif len(surroundings) > 45:
+        surroundings["_dist_to_focus"] = surroundings.apply(
+            lambda row: min(_bbox_gap(row, building) for _, building in focus_zone.iterrows()),
+            axis=1
+        )
+        surroundings = surroundings.nsmallest(45, "_dist_to_focus").copy()
+
+    plot_df = pd.concat([
+        zone[["centroid_x", "centroid_y", "height_m", "type", "label", "focus"]],
+        surroundings[["centroid_x", "centroid_y", "height_m", "type", "label", "focus"]],
+    ], ignore_index=True)
+    origin_x = float(plot_df["centroid_x"].min())
+    origin_y = float(plot_df["centroid_y"].min())
+    plot_df["x_local"] = plot_df["centroid_x"] - origin_x
+    plot_df["y_local"] = plot_df["centroid_y"] - origin_y
+
     base = alt.Chart(plot_df).mark_circle(opacity=0.82, stroke="#ffffff", strokeWidth=0.8).encode(
-        x=alt.X("centroid_x:Q", title="Site x-coordinate", axis=alt.Axis(labels=False, ticks=False)),
-        y=alt.Y("centroid_y:Q", title="Site y-coordinate", axis=alt.Axis(labels=False, ticks=False)),
+        x=alt.X("x_local:Q", title="Local site x (m)", scale=alt.Scale(zero=False)),
+        y=alt.Y("y_local:Q", title="Local site y (m)", scale=alt.Scale(zero=False)),
         size=alt.Size("height_m:Q", title="Height (m)", scale=alt.Scale(range=[60, 900])),
         color=alt.Color("type:N", scale=alt.Scale(
             domain=["Project building", "Surrounding building"],
@@ -173,17 +203,21 @@ def chart_massing_shading(cea_data, selected_buildings, output_mode):
     labels = alt.Chart(plot_df[plot_df["type"] == "Project building"]).mark_text(
         dy=-12, fontSize=10, color=C_DEMAND
     ).encode(
-        x="centroid_x:Q",
-        y="centroid_y:Q",
+        x="x_local:Q",
+        y="y_local:Q",
         text="label:N"
     )
 
     chart = base + labels
     if links:
         link_df = pd.DataFrame(links)
+        link_df["x1_local"] = link_df["x1"] - origin_x
+        link_df["y1_local"] = link_df["y1"] - origin_y
+        link_df["x2_local"] = link_df["x2"] - origin_x
+        link_df["y2_local"] = link_df["y2"] - origin_y
         segments = pd.concat([
-            link_df.assign(x=link_df["x1"], y=link_df["y1"], order=0),
-            link_df.assign(x=link_df["x2"], y=link_df["y2"], order=1),
+            link_df.assign(x=link_df["x1_local"], y=link_df["y1_local"], order=0),
+            link_df.assign(x=link_df["x2_local"], y=link_df["y2_local"], order=1),
         ])
         link_chart = alt.Chart(segments).mark_line(
             color=C_CARBON, opacity=0.55, strokeDash=[4, 3]
