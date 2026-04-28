@@ -114,6 +114,7 @@ Important:
 - Start with the readiness rating and whether it is provisional.
 - State the main infrastructure constraint or enabler.
 - Give one design implication: self-consumption-first, export-ready, storage/load-shifting needed, or thermal-system mismatch.
+- Do not lead with a raw PV/demand ratio. Translate it first into what the architect should do early in design.
 
 **Explain the numbers**
 - Explain peak PV, peak demand, annual PV/demand ratio, and transformer screening.
@@ -127,6 +128,7 @@ Important:
 - If thermal systems are not electric, do not oversell BIPV as solving heating carbon.
 - If electric loads are present, suggest aligning PV surfaces/timing with those loads.
 - Mention external utility checks only as next-step verification, not as already-known facts.
+- Include early design allowances where relevant: inverter room, battery-ready area, risers, roof access, PV zoning, and future expansion route.
 
 ---
 
