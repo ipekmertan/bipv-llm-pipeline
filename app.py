@@ -5,6 +5,8 @@ import os
 import io
 import tempfile
 import pandas as pd
+import struct
+import math
 from pathlib import Path
 import requests
 import sys
@@ -83,6 +85,101 @@ def get_building_names(cea_data):
         return sorted(df["name"].tolist())
     return []
 
+
+def _read_dbf_records(dbf_path):
+    records = []
+    try:
+        with open(dbf_path, "rb") as f:
+            header = f.read(32)
+            if len(header) < 32:
+                return records
+            n_records = struct.unpack("<I", header[4:8])[0]
+            header_len = struct.unpack("<H", header[8:10])[0]
+            record_len = struct.unpack("<H", header[10:12])[0]
+
+            fields = []
+            while f.tell() < header_len:
+                raw = f.read(32)
+                if not raw or raw[0] == 0x0D:
+                    break
+                name = raw[:11].split(b"\x00", 1)[0].decode("latin1").strip()
+                ftype = chr(raw[11])
+                length = raw[16]
+                decimals = raw[17]
+                if name:
+                    fields.append((name, ftype, length, decimals))
+
+            f.seek(header_len)
+            for _ in range(n_records):
+                raw_record = f.read(record_len)
+                if len(raw_record) < record_len or raw_record[:1] == b"*":
+                    continue
+                pos = 1
+                row = {}
+                for name, ftype, length, _decimals in fields:
+                    raw_value = raw_record[pos:pos + length]
+                    pos += length
+                    text = raw_value.decode("latin1", errors="ignore").strip()
+                    if ftype in ("N", "F"):
+                        try:
+                            row[name] = float(text) if text else None
+                        except ValueError:
+                            row[name] = None
+                    elif ftype == "L":
+                        row[name] = text.upper() in ("Y", "T")
+                    else:
+                        row[name] = text
+                records.append(row)
+    except Exception:
+        return []
+    return records
+
+
+def _read_shp_bboxes(shp_path):
+    bboxes = []
+    try:
+        with open(shp_path, "rb") as f:
+            f.seek(100)
+            while True:
+                rec_header = f.read(8)
+                if len(rec_header) < 8:
+                    break
+                _rec_num, content_words = struct.unpack(">2i", rec_header)
+                content = f.read(content_words * 2)
+                if len(content) < 4:
+                    break
+                shape_type = struct.unpack("<i", content[:4])[0]
+                if shape_type in (3, 5, 8, 13, 15, 18, 23, 25, 28, 31) and len(content) >= 36:
+                    minx, miny, maxx, maxy = struct.unpack("<4d", content[4:36])
+                    bboxes.append({
+                        "minx": minx,
+                        "miny": miny,
+                        "maxx": maxx,
+                        "maxy": maxy,
+                        "centroid_x": (minx + maxx) / 2,
+                        "centroid_y": (miny + maxy) / 2,
+                        "footprint_m2": max(0, (maxx - minx) * (maxy - miny)),
+                    })
+                else:
+                    bboxes.append({})
+    except Exception:
+        return []
+    return bboxes
+
+
+def _read_geometry_table(shp_path):
+    dbf_path = shp_path.with_suffix(".dbf")
+    records = _read_dbf_records(dbf_path)
+    bboxes = _read_shp_bboxes(shp_path)
+    rows = []
+    for idx, record in enumerate(records):
+        row = dict(record)
+        if idx < len(bboxes):
+            row.update(bboxes[idx])
+        rows.append(row)
+    return pd.DataFrame(rows) if rows else None
+
+
 def extract_cea_zip(uploaded_file):
     result = {"files": {}, "available_simulations": [], "errors": []}
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -130,6 +227,17 @@ def extract_cea_zip(uploaded_file):
         if envelope.exists():
             try: result["files"]["envelope.csv"] = pd.read_csv(envelope)
             except: pass
+
+        geometry_dir = scenario / "inputs" / "building-geometry"
+        for geom_name in ["zone", "surroundings", "site"]:
+            shp_path = geometry_dir / f"{geom_name}.shp"
+            if shp_path.exists() and shp_path.with_suffix(".dbf").exists():
+                try:
+                    geom_df = _read_geometry_table(shp_path)
+                    if geom_df is not None:
+                        result["files"][f"{geom_name}_geometry.csv"] = geom_df
+                except Exception:
+                    pass
 
         fpath = scenario / "inputs" / "database" / "COMPONENTS" / "CONVERSION" / "PHOTOVOLTAIC_PANELS.csv"
         if fpath.exists():
@@ -345,6 +453,11 @@ COMPACT_SKILL_TASKS = {
         "Synthesize solar potential, available area or simulated installed area, WWR, accessibility, "
         "and visibility into a surface-by-surface BIPV suitability matrix. Identify integration opportunities "
         "and data-visible conflicts without repeating generic BIPV advice."
+    ),
+    "site-potential--massing-and-shading-strategy": (
+        "Synthesize surrounding-building geometry, project massing, and irradiation results into massing moves "
+        "that improve solar access. Focus on obstruction risk, solar-exposed surfaces, underperforming surfaces, "
+        "and form changes such as stepping, setbacks, orientation, splitting mass, or moving program volume."
     ),
     "optimize-my-design--panel-type-tradeoff": (
         "Interpret the simulated PV panel type comparison using actual generation, installed area, yield "
@@ -790,6 +903,176 @@ def compute_envelope_suitability_metrics(cea_data, selected_buildings=None, scal
     return "\n".join(lines)
 
 
+def _height_col(df):
+    return _find_metric_col(df, "height_ag", "height", "floors_ag", "floors")
+
+
+def _height_value(row, col):
+    if not col or col not in row:
+        return None
+    value = row[col]
+    try:
+        value = float(value)
+    except Exception:
+        return None
+    if "floor" in col.lower():
+        return value * 3.2
+    return value
+
+
+def _bbox_gap(a, b):
+    dx = max(float(a["minx"]) - float(b["maxx"]), float(b["minx"]) - float(a["maxx"]), 0)
+    dy = max(float(a["miny"]) - float(b["maxy"]), float(b["miny"]) - float(a["maxy"]), 0)
+    return math.hypot(dx, dy)
+
+
+def _direction_from_to(source, target):
+    dx = float(target["centroid_x"]) - float(source["centroid_x"])
+    dy = float(target["centroid_y"]) - float(source["centroid_y"])
+    if abs(dx) > abs(dy):
+        return "east" if dx > 0 else "west"
+    return "north" if dy > 0 else "south"
+
+
+def compute_massing_shading_metrics(cea_data, selected_buildings=None, scale="District"):
+    files = cea_data.get("files", {})
+    irr_df = files.get("solar_irradiation_annually_buildings.csv")
+    if irr_df is None:
+        return "Building-level annual irradiation is not available, so massing/shading strategy cannot identify which buildings or surfaces are constrained."
+
+    irr_df = irr_df.copy()
+    irr_name_col = _find_metric_col(irr_df, "name", "building")
+    if selected_buildings and irr_name_col:
+        irr_df = irr_df[irr_df[irr_name_col].isin(selected_buildings)]
+    if irr_df.empty:
+        return "Annual irradiation data is available, but no rows match the selected buildings."
+
+    zone_df = files.get("zone_geometry.csv")
+    surroundings_df = files.get("surroundings_geometry.csv")
+    zone_name_col = _find_metric_col(zone_df, "name", "building") if zone_df is not None else None
+    zone_height_col = _height_col(zone_df) if zone_df is not None else None
+    surroundings_name_col = _find_metric_col(surroundings_df, "name", "building") if surroundings_df is not None else None
+    surroundings_height_col = _height_col(surroundings_df) if surroundings_df is not None else None
+
+    selected_zone = zone_df.copy() if zone_df is not None else None
+    if selected_zone is not None and selected_buildings and zone_name_col:
+        selected_zone = selected_zone[selected_zone[zone_name_col].isin(selected_buildings)]
+
+    surfaces = {name: col for name, col in _surface_columns(irr_df).items() if col}
+    if not surfaces:
+        return "Annual irradiation data is available, but no opaque surface irradiation columns were found."
+
+    rows = []
+    for _, row in irr_df.iterrows():
+        bname = str(row[irr_name_col]) if irr_name_col else "selected area"
+        surface_values = {surface: float(row[col]) for surface, col in surfaces.items()}
+        total = sum(surface_values.values())
+        best_surface = max(surface_values, key=surface_values.get)
+        weakest_surface = min(surface_values, key=surface_values.get)
+        roof = surface_values.get("Roof", 0)
+        best_facade = max(
+            [(s, v) for s, v in surface_values.items() if s != "Roof"],
+            key=lambda item: item[1],
+            default=(None, 0),
+        )
+        rows.append({
+            "name": bname,
+            "total": total,
+            "best_surface": best_surface,
+            "weakest_surface": weakest_surface,
+            "roof": roof,
+            "best_facade": best_facade[0],
+            "best_facade_value": best_facade[1],
+            "surface_values": surface_values,
+        })
+
+    ranked = sorted(rows, key=lambda item: item["total"], reverse=True)
+    weakest = sorted(rows, key=lambda item: item["total"])
+
+    lines = [
+        "Sources: solar_irradiation_annually_buildings.csv; "
+        f"zone_geometry.csv {'available' if zone_df is not None else 'not available'}; "
+        f"surroundings_geometry.csv {'available' if surroundings_df is not None else 'not available'}.",
+        f"Scale: {scale}",
+        "CEA irradiation already includes shading from the surroundings file. Do not apply another shading penalty; use geometry to interpret likely causes and massing responses.",
+        "Solar-access ranking:",
+    ]
+    for item in ranked[:8]:
+        lines.append(
+            f"- {item['name']}: total opaque-surface irradiation {_format_number(item['total'], ' kWh/year')}; "
+            f"best surface {item['best_surface']}; best facade {item['best_facade'] or 'not available'} "
+            f"({_format_number(item['best_facade_value'], ' kWh/year')}); weakest surface {item['weakest_surface']}."
+        )
+
+    if len(rows) > 1:
+        lines.append(
+            f"Strongest solar-access building: {ranked[0]['name']} ({_format_number(ranked[0]['total'], ' kWh/year')})."
+        )
+        lines.append(
+            f"Most constrained selected building by total irradiation: {weakest[0]['name']} ({_format_number(weakest[0]['total'], ' kWh/year')})."
+        )
+
+    geometry_ok = (
+        selected_zone is not None and not selected_zone.empty
+        and surroundings_df is not None and not surroundings_df.empty
+        and all(c in selected_zone.columns for c in ["minx", "miny", "maxx", "maxy", "centroid_x", "centroid_y"])
+        and all(c in surroundings_df.columns for c in ["minx", "miny", "maxx", "maxy", "centroid_x", "centroid_y"])
+    )
+
+    obstruction_notes = []
+    if geometry_ok:
+        for _, building in selected_zone.iterrows():
+            bname = str(building[zone_name_col]) if zone_name_col else "selected building"
+            bheight = _height_value(building, zone_height_col) or 0
+            candidates = []
+            for _, neighbour in surroundings_df.iterrows():
+                nheight = _height_value(neighbour, surroundings_height_col) or 0
+                distance = _bbox_gap(building, neighbour)
+                direction = _direction_from_to(building, neighbour)
+                critical_distance = max(nheight * 2, 1)
+                if distance <= critical_distance or nheight > bheight:
+                    candidates.append({
+                        "name": str(neighbour[surroundings_name_col]) if surroundings_name_col else "surrounding mass",
+                        "height": nheight,
+                        "distance": distance,
+                        "direction": direction,
+                        "critical_distance": critical_distance,
+                        "taller": nheight > bheight,
+                    })
+            candidates = sorted(candidates, key=lambda item: (item["distance"], -item["height"]))[:5]
+            if candidates:
+                lines.append(f"Nearby obstruction context for {bname} (height approx. {_format_number(bheight, ' m', 1)}):")
+                for c in candidates:
+                    taller_text = "taller than target" if c["taller"] else "not taller than target"
+                    lines.append(
+                        f"- {c['name']}: {c['direction']} side; height {_format_number(c['height'], ' m', 1)}; "
+                        f"gap approx. {_format_number(c['distance'], ' m', 1)}; {taller_text}; "
+                        f"2H influence distance approx. {_format_number(c['critical_distance'], ' m', 1)}."
+                    )
+                    if c["direction"] == "south":
+                        obstruction_notes.append(f"{bname}: south-side obstruction may reduce roof/south-facade winter solar access.")
+                    elif c["direction"] in ("east", "west"):
+                        obstruction_notes.append(f"{bname}: {c['direction']}-side obstruction may reduce morning/afternoon facade usefulness.")
+    else:
+        lines.append("Surrounding geometry is not available or lacks usable bboxes/heights, so obstruction causes cannot be assigned to specific neighbours.")
+
+    if obstruction_notes:
+        lines.append("Likely shading constraints:")
+        for note in sorted(set(obstruction_notes))[:8]:
+            lines.append(f"- {note}")
+
+    lines.append("Massing strategy options to consider:")
+    lines.append("- Preserve or expand the highest-irradiation roof plane as the baseline solar collector.")
+    lines.append("- Step down massing toward the south where southern obstructions or self-shading are likely.")
+    lines.append("- Increase setbacks from tall south/east/west neighbours where the gap is within roughly 2x neighbour height.")
+    lines.append("- Shift height or dense program volume toward the north side of the plot to keep southern roof/facade exposure clearer.")
+    lines.append("- Elongate the building east-west when the goal is a larger south-facing BIPV facade; split bulky volumes if that reduces self-shading.")
+    lines.append("- If a facade is persistently weak, deprioritise it for PV and use it for windows, access, services, or conventional cladding.")
+    lines.append("- If the optimal solar form differs strongly from the current massing, state that the massing itself should be renegotiated rather than merely placing panels on poor surfaces.")
+
+    return "\n".join(lines)
+
+
 def compute_panel_tradeoff_metrics(cea_data, selected_buildings=None):
     files = cea_data.get("files", {})
     panel_db = files.get("PHOTOVOLTAIC_PANELS.csv")
@@ -887,6 +1170,8 @@ def compute_compact_metrics(skill_id, cea_data, selected_buildings=None, scale="
         return compute_surface_irradiation_metrics(cea_data, selected_buildings, scale)
     if skill_id == "site-potential--envelope-suitability":
         return compute_envelope_suitability_metrics(cea_data, selected_buildings, scale)
+    if skill_id == "site-potential--massing-and-shading-strategy":
+        return compute_massing_shading_metrics(cea_data, selected_buildings, scale)
     if skill_id == "optimize-my-design--panel-type-tradeoff":
         return compute_panel_tradeoff_metrics(cea_data, selected_buildings)
     return None
