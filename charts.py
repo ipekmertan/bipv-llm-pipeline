@@ -143,24 +143,36 @@ def chart_massing_shading(cea_data, selected_buildings, output_mode):
     if not focus_zone.empty:
         for _, building in focus_zone.iterrows():
             bheight = float(building["height_m"]) if building["height_m"] == building["height_m"] else 0
-            candidates = []
-            for _, neighbour in surroundings.iterrows():
-                nheight = float(neighbour["height_m"]) if neighbour["height_m"] == neighbour["height_m"] else 0
-                distance = _bbox_gap(building, neighbour)
-                critical_distance = max(nheight * 2, 1)
-                if distance <= critical_distance or nheight > bheight:
-                    candidates.append({
-                        "target": str(building["label"]),
-                        "source": str(neighbour["label"]),
-                        "x1": float(building["centroid_x"]),
-                        "y1": float(building["centroid_y"]),
-                        "x2": float(neighbour["centroid_x"]),
-                        "y2": float(neighbour["centroid_y"]),
-                        "distance_m": distance,
-                        "height_m": nheight,
-                        "direction": _direction_from_to(building, neighbour),
-                    })
-            links.extend(sorted(candidates, key=lambda item: item["distance_m"])[:5])
+            external_candidates = []
+            project_candidates = []
+            neighbour_sources = [
+                ("External surrounding", surroundings),
+                ("Project-to-project", zone[zone["label"] != building["label"]]),
+            ]
+            for source_type, source_df in neighbour_sources:
+                for _, neighbour in source_df.iterrows():
+                    nheight = float(neighbour["height_m"]) if neighbour["height_m"] == neighbour["height_m"] else 0
+                    distance = _bbox_gap(building, neighbour)
+                    critical_distance = max(nheight * 2, 1)
+                    if distance <= critical_distance or nheight > bheight:
+                        candidates.append({
+                            "target": str(building["label"]),
+                            "source": str(neighbour["label"]),
+                            "source_type": source_type,
+                            "x1": float(building["centroid_x"]),
+                            "y1": float(building["centroid_y"]),
+                            "x2": float(neighbour["centroid_x"]),
+                            "y2": float(neighbour["centroid_y"]),
+                            "distance_m": distance,
+                            "height_m": nheight,
+                            "direction": _direction_from_to(building, neighbour),
+                        })
+                        if source_type == "Project-to-project":
+                            project_candidates.append(candidate)
+                        else:
+                            external_candidates.append(candidate)
+            links.extend(sorted(project_candidates, key=lambda item: item["distance_m"])[:5])
+            links.extend(sorted(external_candidates, key=lambda item: item["distance_m"])[:5])
 
     linked_names = {item["source"] for item in links}
     if linked_names:
@@ -220,14 +232,19 @@ def chart_massing_shading(cea_data, selected_buildings, output_mode):
             link_df.assign(x=link_df["x2_local"], y=link_df["y2_local"], order=1),
         ])
         link_chart = alt.Chart(segments).mark_line(
-            color=C_CARBON, opacity=0.55, strokeDash=[4, 3]
+            opacity=0.6, strokeDash=[4, 3]
         ).encode(
             x="x:Q",
             y="y:Q",
             detail="source:N",
             order="order:Q",
+            color=alt.Color("source_type:N", scale=alt.Scale(
+                domain=["External surrounding", "Project-to-project"],
+                range=[C_CARBON, C_DEMAND]
+            ), legend=alt.Legend(title="Obstruction link")),
             tooltip=[
                 alt.Tooltip("source:N", title="Potential obstruction"),
+                alt.Tooltip("source_type:N", title="Source type"),
                 alt.Tooltip("target:N", title="Target"),
                 alt.Tooltip("direction:N", title="Direction"),
                 alt.Tooltip("distance_m:Q", title="Gap (m)", format=".1f"),
