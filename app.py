@@ -32,7 +32,7 @@ SKILL_SIMULATION_MAP = {
     "impact-and-viability--carbon-impact--carbon-payback": ["pv", "demand"],
     "impact-and-viability--economic-viability--cost-analysis": ["pv", "demand"],
     "impact-and-viability--economic-viability--investment-payback": ["pv", "demand"],
-    "site-potential--contextual-feasibility--infrastructure-readiness": [],
+    "site-potential--contextual-feasibility--infrastructure-readiness": ["pv", "demand"],
     "site-potential--contextual-feasibility--regulatory-constraints": [],
     "site-potential--contextual-feasibility--basic-economic-signal": [],
 }
@@ -228,6 +228,24 @@ def extract_cea_zip(uploaded_file):
         if envelope.exists():
             try: result["files"]["envelope.csv"] = pd.read_csv(envelope)
             except: pass
+
+        supply = scenario / "inputs" / "building-properties" / "supply.csv"
+        if supply.exists():
+            try: result["files"]["supply.csv"] = pd.read_csv(supply)
+            except: pass
+
+        supply_dir = scenario / "inputs" / "database" / "ASSEMBLIES" / "SUPPLY"
+        for fname in ["SUPPLY_HEATING.csv", "SUPPLY_HOTWATER.csv", "SUPPLY_ELECTRICITY.csv", "SUPPLY_COOLING.csv"]:
+            fpath = supply_dir / fname
+            if fpath.exists():
+                try: result["files"][fname] = pd.read_csv(fpath)
+                except: pass
+
+        thermal_dir = scenario / "outputs" / "data" / "thermal-network"
+        if thermal_dir.exists():
+            network_files = [str(p.relative_to(thermal_dir)) for p in thermal_dir.rglob("*.csv")]
+            if network_files:
+                result["files"]["thermal_network_files"] = network_files[:80]
 
         geometry_dir = scenario / "inputs" / "building-geometry"
         for geom_name in ["zone", "surroundings", "site"]:
@@ -459,6 +477,11 @@ COMPACT_SKILL_TASKS = {
         "Synthesize surrounding-building geometry, project massing, and irradiation results into massing moves "
         "that improve solar access. Focus on obstruction risk, solar-exposed surfaces, underperforming surfaces, "
         "and form changes such as stepping, setbacks, orientation, splitting mass, or moving program volume."
+    ),
+    "site-potential--contextual-feasibility--infrastructure-readiness": (
+        "Use CEA data only as project-side infrastructure pressure: PV peak, demand peak, export pressure, "
+        "grid assumptions, and supply-system compatibility. Full infrastructure readiness requires external "
+        "utility/policy data; if no web-search results are provided, state that the readiness rating is provisional."
     ),
     "optimize-my-design--panel-type-tradeoff": (
         "Interpret the simulated PV panel type comparison using actual generation, installed area, yield "
@@ -1150,6 +1173,143 @@ def compute_massing_shading_metrics(cea_data, selected_buildings=None, scale="Di
     return "\n".join(lines)
 
 
+def _lookup_supply_descriptions(supply_df, lookup_df, code_col_name):
+    if supply_df is None or lookup_df is None or code_col_name not in supply_df.columns:
+        return []
+    code_col = _find_metric_col(lookup_df, "code")
+    desc_col = _find_metric_col(lookup_df, "description")
+    if not code_col or not desc_col:
+        return []
+    lookup = {
+        str(row[code_col]): str(row[desc_col])
+        for _, row in lookup_df.iterrows()
+    }
+    descriptions = []
+    for code in supply_df[code_col_name].dropna().astype(str).unique():
+        descriptions.append(f"{code}: {lookup.get(code, 'description not found')}")
+    return descriptions
+
+
+def compute_infrastructure_readiness_metrics(cea_data, selected_buildings=None, scale="District"):
+    files = cea_data.get("files", {})
+
+    pv_fname = next((k for k in files
+                     if k.startswith("PV_PV") and k.endswith("_total.csv")
+                     and "buildings" not in k), None)
+    pv_df = files.get(pv_fname) if pv_fname else None
+    pv_col = _find_metric_col(pv_df, "E_PV_gen", "E_PV", "gen") if pv_df is not None else None
+
+    demand_df = files.get("Total_demand_hourly.csv")
+    demand_source = "Total_demand_hourly.csv"
+    if selected_buildings:
+        demand_frames = []
+        for bname in selected_buildings:
+            df = files.get(f"{bname}.csv")
+            if df is not None:
+                demand_frames.append(df)
+        if demand_frames:
+            demand_df = pd.concat(demand_frames, ignore_index=True)
+            demand_source = "selected building hourly demand files"
+    demand_col = _find_metric_col(demand_df, "E_sys_kWh", "GRID", "E_tot") if demand_df is not None else None
+
+    peak_pv_kw = float(pv_df[pv_col].max()) if pv_df is not None and pv_col else None
+    annual_pv_kwh = float(pv_df[pv_col].sum()) if pv_df is not None and pv_col else None
+    peak_demand_kw = float(demand_df[demand_col].max()) if demand_df is not None and demand_col else None
+    annual_demand_kwh = float(demand_df[demand_col].sum()) if demand_df is not None and demand_col else None
+
+    pv_to_demand_peak = (peak_pv_kw / peak_demand_kw) if peak_pv_kw is not None and peak_demand_kw and peak_demand_kw > 0 else None
+    pv_to_demand_annual = (annual_pv_kwh / annual_demand_kwh) if annual_pv_kwh is not None and annual_demand_kwh and annual_demand_kwh > 0 else None
+
+    transformer_assumption_kva = 630
+    transformer_ratio = peak_pv_kw / transformer_assumption_kva if peak_pv_kw is not None else None
+    if transformer_ratio is None:
+        readiness = "UNKNOWN"
+    elif transformer_ratio < 0.25:
+        readiness = "STRONG"
+    elif transformer_ratio <= 0.75:
+        readiness = "MODERATE"
+    else:
+        readiness = "CONSTRAINED"
+
+    grid_df = files.get("GRID.csv")
+    grid_carbon = buy_price = sell_price = None
+    if grid_df is not None:
+        carbon_col = _find_metric_col(grid_df, "GHG_kgCO2MJ", "CO2", "GHG")
+        buy_col = _find_metric_col(grid_df, "Opex_var_buy", "buy")
+        sell_col = _find_metric_col(grid_df, "Opex_var_sell", "sell")
+        if carbon_col:
+            grid_carbon = float(pd.to_numeric(grid_df[carbon_col], errors="coerce").mean()) * 3.6
+        if buy_col:
+            buy_price = float(pd.to_numeric(grid_df[buy_col], errors="coerce").mean())
+        if sell_col:
+            sell_price = float(pd.to_numeric(grid_df[sell_col], errors="coerce").mean())
+
+    supply_df = files.get("supply.csv")
+    if supply_df is not None and selected_buildings:
+        name_col = _find_metric_col(supply_df, "name", "building")
+        if name_col:
+            supply_df = supply_df[supply_df[name_col].isin(selected_buildings)]
+
+    heating = _lookup_supply_descriptions(supply_df, files.get("SUPPLY_HEATING.csv"), "supply_type_hs")
+    hotwater = _lookup_supply_descriptions(supply_df, files.get("SUPPLY_HOTWATER.csv"), "supply_type_dhw")
+    electricity = _lookup_supply_descriptions(supply_df, files.get("SUPPLY_ELECTRICITY.csv"), "supply_type_el")
+    cooling = _lookup_supply_descriptions(supply_df, files.get("SUPPLY_COOLING.csv"), "supply_type_cs")
+
+    thermal_files = files.get("thermal_network_files")
+    dh_present = bool(thermal_files and any("/DH/" in f or f.startswith("DH/") for f in thermal_files))
+    dc_present = bool(thermal_files and any("/DC/" in f or f.startswith("DC/") for f in thermal_files))
+
+    lines = [
+        f"Sources: {pv_fname or 'no PV total file'}; {demand_source if demand_df is not None else 'no hourly demand file'}; GRID.csv {'available' if grid_df is not None else 'not available'}; supply.csv {'available' if supply_df is not None else 'not available'}.",
+        f"Scale: {scale}",
+        f"Project-side infrastructure pressure from CEA screening: {readiness}.",
+        "Full infrastructure readiness cannot be confirmed from CEA alone. Local transformer capacity, grid export caps, permitting timelines, net metering, feed-in tariffs, and utility approval rules require external web/utility data.",
+        "Grid/export screening:",
+    ]
+    lines.append(f"- Peak PV generation: {_format_number(peak_pv_kw, ' kW', 1)}.")
+    lines.append(f"- Annual PV generation: {_format_number(annual_pv_kwh, ' kWh/year')}.")
+    lines.append(f"- Peak electricity demand: {_format_number(peak_demand_kw, ' kW', 1)}.")
+    lines.append(f"- Annual electricity demand: {_format_number(annual_demand_kwh, ' kWh/year')}.")
+    lines.append(f"- PV peak / demand peak: {_format_number(pv_to_demand_peak * 100 if pv_to_demand_peak is not None else None, '%', 1)}.")
+    lines.append(f"- PV annual generation / annual demand: {_format_number(pv_to_demand_annual * 100 if pv_to_demand_annual is not None else None, '%', 1)}.")
+    lines.append(
+        f"- Transformer screening: peak PV is {_format_number(transformer_ratio * 100 if transformer_ratio is not None else None, '%', 1)} "
+        f"of an indicative {transformer_assumption_kva} kVA neighbourhood transformer. Replace this assumption with actual utility data when available."
+    )
+
+    if grid_carbon is not None or buy_price is not None or sell_price is not None:
+        lines.append("Grid assumptions from GRID.csv:")
+        lines.append(f"- Grid carbon factor: {_format_number(grid_carbon, ' kgCO2/kWh', 3)}.")
+        lines.append(f"- Grid buy price: {_format_number(buy_price, ' currency/kWh', 3)}.")
+        lines.append(f"- Grid sell price: {_format_number(sell_price, ' currency/kWh', 3)}.")
+
+    lines.append("Supply-system compatibility:")
+    if electricity:
+        lines.append(f"- Electricity supply: {'; '.join(electricity)}.")
+    if heating:
+        lines.append(f"- Heating supply: {'; '.join(heating)}.")
+    if hotwater:
+        lines.append(f"- Hot water supply: {'; '.join(hotwater)}.")
+    if cooling:
+        lines.append(f"- Cooling supply: {'; '.join(cooling)}.")
+    if dh_present or dc_present:
+        networks = []
+        if dh_present:
+            networks.append("district heating network outputs found")
+        if dc_present:
+            networks.append("district cooling network outputs found")
+        lines.append(f"- Thermal-network context: {', '.join(networks)}.")
+    else:
+        lines.append("- Thermal-network context: no district heating/cooling network output was detected in the extracted results.")
+
+    lines.append("Interpretation rules:")
+    lines.append("- If PV peak is large relative to demand peak or assumed transformer capacity, frame readiness as export-constrained and prioritise self-consumption, load shifting, or storage.")
+    lines.append("- If heating is boiler/district-heating based, BIPV electricity does not directly offset heating carbon unless heat pumps or electric heating are part of the system definition.")
+    lines.append("- If heat pumps/electric cooling are present, align PV production with those electrical loads before maximising export.")
+    lines.append("- Do not claim net metering, feed-in tariff, or utility approval status unless an external search module supplies that information.")
+    return "\n".join(lines)
+
+
 def compute_panel_tradeoff_metrics(cea_data, selected_buildings=None):
     files = cea_data.get("files", {})
     panel_db = files.get("PHOTOVOLTAIC_PANELS.csv")
@@ -1249,6 +1409,8 @@ def compute_compact_metrics(skill_id, cea_data, selected_buildings=None, scale="
         return compute_envelope_suitability_metrics(cea_data, selected_buildings, scale)
     if skill_id == "site-potential--massing-and-shading-strategy":
         return compute_massing_shading_metrics(cea_data, selected_buildings, scale)
+    if skill_id == "site-potential--contextual-feasibility--infrastructure-readiness":
+        return compute_infrastructure_readiness_metrics(cea_data, selected_buildings, scale)
     if skill_id == "optimize-my-design--panel-type-tradeoff":
         return compute_panel_tradeoff_metrics(cea_data, selected_buildings)
     return None
@@ -1299,21 +1461,21 @@ def render_massing_strategy_sketches(text, skill_id, output_mode):
             "title": "Stepped / Terraced Massing",
             "note": "Lower the solar-critical edge and use upper setbacks as exposed PV roof planes.",
             "blocks": [(48, 78, 58, 34, 86), (104, 88, 58, 34, 58), (160, 98, 58, 34, 34)],
-            "sun": "south sun",
+            "sun": "north taller -> south lower",
         },
         {
             "keys": ["split", "bar"],
             "title": "Split-Bar Massing",
             "note": "Break a bulky block into thinner bars to reduce project-to-project obstruction and expose more facade/roof area.",
             "blocks": [(46, 96, 62, 34, 64), (166, 96, 62, 34, 64)],
-            "sun": "gap for light",
+            "sun": "gap for light ->",
         },
         {
             "keys": ["courtyard", "void", "carve", "subtractive"],
             "title": "Subtractive / Courtyard Massing",
             "note": "Start from the allowed volume, then carve a void where it improves solar and daylight access.",
             "blocks": [(46, 76, 48, 30, 58), (94, 76, 48, 30, 58), (142, 76, 48, 30, 58), (46, 126, 48, 30, 58), (142, 126, 48, 30, 58)],
-            "sun": "carved void",
+            "sun": "carved void ->",
         },
         {
             "keys": ["setback", "spacing", "distance"],
@@ -1321,14 +1483,14 @@ def render_massing_strategy_sketches(text, skill_id, output_mode):
             "note": "Open distance from a tall obstruction before treating the shaded facade as a main PV surface.",
             "blocks": [(50, 90, 56, 34, 88), (178, 104, 60, 34, 48)],
             "gap": True,
-            "sun": "setback",
+            "sun": "setback ->",
         },
         {
             "keys": ["north", "shift height", "shift the height", "dense program"],
             "title": "Shift Height Northward",
             "note": "Keep taller program volume away from the solar-critical south edge.",
             "blocks": [(66, 104, 62, 34, 34), (150, 84, 62, 34, 88)],
-            "sun": "lower south edge",
+            "sun": "lower south edge ->",
         },
         {
             "keys": ["stilt", "lift"],
@@ -1336,7 +1498,7 @@ def render_massing_strategy_sketches(text, skill_id, output_mode):
             "note": "Lift part of the volume to reduce ground-level obstruction and improve porosity/daylight.",
             "blocks": [(74, 72, 124, 40, 42)],
             "stilts": True,
-            "sun": "open ground",
+            "sun": "open ground ->",
         },
     ]
 
@@ -1390,7 +1552,7 @@ def render_massing_strategy_sketches(text, skill_id, output_mode):
         <section class="sketch-card">
           <div class="sketch-title">{strategy['title']}</div>
           <div class="scene-wrap">
-            <div class="sun-arrow">{strategy['sun']} →</div>
+            <div class="sun-arrow">{strategy['sun']}</div>
             <svg class="massing-svg" viewBox="0 0 300 220" role="img" aria-label="{strategy['title']} schematic">
               {blocks}
               {stilts}
