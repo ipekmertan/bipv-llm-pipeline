@@ -582,13 +582,14 @@ def chart_seasonal_patterns(cea_data, selected_buildings, output_mode):
 
 def chart_daily_patterns(cea_data, selected_buildings, output_mode):
     """
-    Daily patterns — line chart, x=hours, one line per surface.
+    Daily patterns — average 24-hour profile, one line per surface.
     """
     df = cea_data["files"].get("solar_irradiation_daily.csv")
     if df is None:
         return None
 
-    hour_col = _find_col(df, "hour", "Hour", "time", "Time")
+    hour_col = _find_col(df, "hour", "Hour")
+    time_col = _find_col(df, "date", "Date", "DATE", "time", "Time")
     surface_map = {
         "Roof":       next((c for c in df.columns if "roof" in c.lower() and "window" not in c.lower()), None),
         "South wall": next((c for c in df.columns if "south" in c.lower() and "window" not in c.lower()), None),
@@ -597,29 +598,55 @@ def chart_daily_patterns(cea_data, selected_buildings, output_mode):
         "North wall": next((c for c in df.columns if "north" in c.lower() and "window" not in c.lower()), None),
     }
     found = {k: v for k, v in surface_map.items() if v is not None}
-    if not found or hour_col is None:
+    if not found or (time_col is None and hour_col is None):
         return None
+
+    df = df.copy()
+    if time_col is not None:
+        df["_dt"] = pd.to_datetime(df[time_col], utc=True, errors="coerce")
+        df["_hour"] = df["_dt"].dt.hour
+        if df["_hour"].notna().sum() == 0 and hour_col is not None:
+            df["_hour"] = pd.to_numeric(df[hour_col], errors="coerce")
+    else:
+        df["_hour"] = pd.to_numeric(df[hour_col], errors="coerce")
+    df = df[df["_hour"].notna()]
+    if df.empty:
+        return None
+    df["_hour"] = df["_hour"].astype(int)
+    if df["_hour"].max() > 23:
+        df["_hour"] = df["_hour"] % 24
 
     rows = []
     for _, row in df.iterrows():
         for surface, col in found.items():
             rows.append({
-                "Hour": int(row[hour_col]),
+                "Hour": row["_hour"],
                 "Surface": surface,
                 "Irradiation (kWh)": float(row[col]) if row[col] == row[col] else 0
             })
     df_long = pd.DataFrame(rows)
+    df_long = (
+        df_long.groupby(["Hour", "Surface"], as_index=False)["Irradiation (kWh)"]
+        .mean()
+    )
+    full_hours = pd.MultiIndex.from_product(
+        [range(24), df_long["Surface"].unique()],
+        names=["Hour", "Surface"]
+    ).to_frame(index=False)
+    df_long = full_hours.merge(df_long, on=["Hour", "Surface"], how="left")
+    df_long["Irradiation (kWh)"] = df_long["Irradiation (kWh)"].fillna(0)
 
     surface_order = [s for s in ["Roof", "South wall", "East wall", "West wall", "North wall"] if s in found]
     color_range   = [C_PV, C_SURPLUS, "#e8b86d", "#a8d5b5", C_NEUTRAL][:len(surface_order)]
 
     chart = alt.Chart(df_long).mark_line(strokeWidth=2).encode(
-        x=alt.X("Hour:Q", title="Hour of day", axis=alt.Axis(tickMinStep=1)),
-        y=alt.Y("Irradiation (kWh):Q", title="Irradiation (kWh)"),
+        x=alt.X("Hour:Q", title="Hour of day", scale=alt.Scale(domain=[0, 23]),
+                axis=alt.Axis(tickMinStep=1)),
+        y=alt.Y("Irradiation (kWh):Q", title="Average irradiation (kWh)"),
         color=alt.Color("Surface:N", scale=alt.Scale(domain=surface_order, range=color_range),
                         legend=alt.Legend(title="Surface")),
         tooltip=["Hour", "Surface", alt.Tooltip("Irradiation (kWh):Q", format=",.1f")]
-    ).properties(title="Solar irradiation by surface — daily profile", height=260)
+    ).properties(title="Average daily irradiation profile by surface", height=260)
     return chart
 
 
@@ -661,4 +688,5 @@ def render_skill_chart(skill_id, cea_data, selected_buildings, output_mode):
         return fn(cea_data, selected_buildings, output_mode)
     except Exception:
         return None
+
 
