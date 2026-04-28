@@ -57,6 +57,7 @@ Before calling the LLM, calculate a compact massing/shading summary:
 - nearest/tall project buildings that may shade other project buildings
 - at building scale, compare the selected building against all other project buildings, not only external surroundings
 - likely obstruction direction: north, south, east, west
+- ranked obstruction risk by side, combining project and surrounding buildings
 - whether a neighbour is within an approximate 2H influence distance
 - massing options that match the evidence
 
@@ -74,6 +75,7 @@ The LLM should:
 - identify the dominant shading/context issue
 - distinguish external obstructions from project-to-project mutual shading
 - at building scale, explicitly state whether the selected building is constrained by other project buildings
+- rank which side is most constrained and name the building causing the strongest obstruction risk
 - say which building/surface should carry most BIPV
 - say which surfaces should be deprioritised
 - propose form changes when they improve solar access
@@ -131,6 +133,7 @@ Do not give generic urban-design advice. Every recommendation must connect to a 
 - Do not list every surrounding building unless it changes the design recommendation.
 - Do not describe charts.
 - Do not promise exact recovered kWh from a massing move unless a rerun simulation exists.
+- Do not present obstruction risk scores as exact simulated shading losses. They are geometry-screening indicators.
 - Do not invent trees, terraces, heritage constraints, or client goals.
 
 ---
