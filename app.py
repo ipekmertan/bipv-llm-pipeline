@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import zipfile
 import json
 import os
@@ -995,6 +996,7 @@ def compute_massing_shading_metrics(cea_data, selected_buildings=None, scale="Di
         f"surroundings_geometry.csv {'available' if surroundings_df is not None else 'not available'}.",
         f"Scale: {scale}",
         "CEA irradiation already includes shading from the surroundings file. Do not apply another shading penalty; use geometry to interpret likely causes and massing responses.",
+        "At building scale, still check the selected building against all other project buildings in zone_geometry.csv. A single selected building can be shaded by the rest of the project, not only by external surroundings.",
         "Solar-access ranking:",
     ]
     for item in ranked[:8]:
@@ -1014,9 +1016,9 @@ def compute_massing_shading_metrics(cea_data, selected_buildings=None, scale="Di
 
     geometry_ok = (
         selected_zone is not None and not selected_zone.empty
-        and surroundings_df is not None and not surroundings_df.empty
+        and zone_df is not None and not zone_df.empty
         and all(c in selected_zone.columns for c in ["minx", "miny", "maxx", "maxy", "centroid_x", "centroid_y"])
-        and all(c in surroundings_df.columns for c in ["minx", "miny", "maxx", "maxy", "centroid_x", "centroid_y"])
+        and all(c in zone_df.columns for c in ["minx", "miny", "maxx", "maxy", "centroid_x", "centroid_y"])
     )
 
     obstruction_notes = []
@@ -1024,25 +1026,42 @@ def compute_massing_shading_metrics(cea_data, selected_buildings=None, scale="Di
         for _, building in selected_zone.iterrows():
             bname = str(building[zone_name_col]) if zone_name_col else "selected building"
             bheight = _height_value(building, zone_height_col) or 0
-            candidates = []
-            for _, neighbour in surroundings_df.iterrows():
-                nheight = _height_value(neighbour, surroundings_height_col) or 0
-                distance = _bbox_gap(building, neighbour)
-                direction = _direction_from_to(building, neighbour)
-                critical_distance = max(nheight * 2, 1)
-                if distance <= critical_distance or nheight > bheight:
-                    candidates.append({
-                        "name": str(neighbour[surroundings_name_col]) if surroundings_name_col else "surrounding mass",
-                        "height": nheight,
-                        "distance": distance,
-                        "direction": direction,
-                        "critical_distance": critical_distance,
-                        "taller": nheight > bheight,
-                    })
-            candidates = sorted(candidates, key=lambda item: (item["distance"], -item["height"]))[:5]
-            if candidates:
-                lines.append(f"Nearby obstruction context for {bname} (height approx. {_format_number(bheight, ' m', 1)}):")
-                for c in candidates:
+            external_candidates = []
+            internal_candidates = []
+            neighbour_sources = []
+            if surroundings_df is not None and not surroundings_df.empty:
+                neighbour_sources.append(("external surrounding", surroundings_df, surroundings_name_col, surroundings_height_col))
+            neighbour_sources.append(("project building", zone_df, zone_name_col, zone_height_col))
+
+            for source_type, source_df, source_name_col, source_height_col in neighbour_sources:
+                for _, neighbour in source_df.iterrows():
+                    nname = str(neighbour[source_name_col]) if source_name_col else source_type
+                    if source_type == "project building" and nname == bname:
+                        continue
+                    nheight = _height_value(neighbour, source_height_col) or 0
+                    distance = _bbox_gap(building, neighbour)
+                    direction = _direction_from_to(building, neighbour)
+                    critical_distance = max(nheight * 2, 1)
+                    if distance <= critical_distance or nheight > bheight:
+                        candidate = {
+                            "name": nname,
+                            "height": nheight,
+                            "distance": distance,
+                            "direction": direction,
+                            "critical_distance": critical_distance,
+                            "taller": nheight > bheight,
+                        }
+                        if source_type == "project building":
+                            internal_candidates.append(candidate)
+                        else:
+                            external_candidates.append(candidate)
+
+            external_candidates = sorted(external_candidates, key=lambda item: (item["distance"], -item["height"]))[:5]
+            internal_candidates = sorted(internal_candidates, key=lambda item: (item["distance"], -item["height"]))[:5]
+
+            if external_candidates:
+                lines.append(f"External obstruction context for {bname} (height approx. {_format_number(bheight, ' m', 1)}):")
+                for c in external_candidates:
                     taller_text = "taller than target" if c["taller"] else "not taller than target"
                     lines.append(
                         f"- {c['name']}: {c['direction']} side; height {_format_number(c['height'], ' m', 1)}; "
@@ -1050,11 +1069,27 @@ def compute_massing_shading_metrics(cea_data, selected_buildings=None, scale="Di
                         f"2H influence distance approx. {_format_number(c['critical_distance'], ' m', 1)}."
                     )
                     if c["direction"] == "south":
-                        obstruction_notes.append(f"{bname}: south-side obstruction may reduce roof/south-facade winter solar access.")
+                        obstruction_notes.append(f"{bname}: external south-side obstruction may reduce roof/south-facade winter solar access.")
                     elif c["direction"] in ("east", "west"):
-                        obstruction_notes.append(f"{bname}: {c['direction']}-side obstruction may reduce morning/afternoon facade usefulness.")
+                        obstruction_notes.append(f"{bname}: external {c['direction']}-side obstruction may reduce morning/afternoon facade usefulness.")
+
+            if internal_candidates:
+                lines.append(f"Project-to-project obstruction context for {bname}:")
+                for c in internal_candidates:
+                    taller_text = "taller than target" if c["taller"] else "not taller than target"
+                    lines.append(
+                        f"- {c['name']}: {c['direction']} side; height {_format_number(c['height'], ' m', 1)}; "
+                        f"gap approx. {_format_number(c['distance'], ' m', 1)}; {taller_text}; "
+                        f"2H influence distance approx. {_format_number(c['critical_distance'], ' m', 1)}."
+                    )
+                    if c["direction"] == "south":
+                        obstruction_notes.append(f"{bname}: project building {c['name']} to the south may cause mutual shading; consider stepping, spacing, or shifting height.")
+                    elif c["direction"] in ("east", "west"):
+                        obstruction_notes.append(f"{bname}: project building {c['name']} to the {c['direction']} may affect morning/afternoon facade strategy.")
+            else:
+                lines.append(f"Project-to-project obstruction context for {bname}: no nearby/tall project building was flagged by the 2H screening rule.")
     else:
-        lines.append("Surrounding geometry is not available or lacks usable bboxes/heights, so obstruction causes cannot be assigned to specific neighbours.")
+        lines.append("Project geometry is not available or lacks usable bboxes/heights, so obstruction causes cannot be assigned to specific neighbours.")
 
     if obstruction_notes:
         lines.append("Likely shading constraints:")
@@ -1069,6 +1104,14 @@ def compute_massing_shading_metrics(cea_data, selected_buildings=None, scale="Di
     lines.append("- Elongate the building east-west when the goal is a larger south-facing BIPV facade; split bulky volumes if that reduces self-shading.")
     lines.append("- If a facade is persistently weak, deprioritise it for PV and use it for windows, access, services, or conventional cladding.")
     lines.append("- If the optimal solar form differs strongly from the current massing, state that the massing itself should be renegotiated rather than merely placing panels on poor surfaces.")
+    lines.append("Performance-based massing option names to suggest when relevant:")
+    lines.append("- Subtractive massing: remove parts of a larger starting volume to create better solar exposure instead of only moving panels.")
+    lines.append("- Courtyard massing: carve an internal void when it can increase useful facade exposure and daylight access without over-shading the lower levels.")
+    lines.append("- Atrium massing: use a taller internal void when solar/daylight access and program organisation both benefit.")
+    lines.append("- Stilted / lifted massing: lift part of the volume when ground-level porosity, daylight, or overshadowing reduction matters.")
+    lines.append("- Solar-envelope massing: shape the allowed volume so it preserves solar access for itself or neighbours.")
+    lines.append("- Split-bar massing: divide a bulky volume into thinner bars to reduce self-shading and expose more roof/facade surface.")
+    lines.append("- Terraced / stepped massing: reduce height toward the solar-critical side and use upper setbacks as solar roof planes.")
 
     return "\n".join(lines)
 
@@ -1207,6 +1250,205 @@ def call_llm(system_prompt, messages):
             return f"⚠️ API error: {e}"
         except Exception as e:
             return f"⚠️ API error: {e}"
+
+
+def render_massing_strategy_sketches(text, skill_id, output_mode):
+    if skill_id != "site-potential--massing-and-shading-strategy":
+        return
+    if output_mode != "Design implication":
+        return
+
+    content = (text or "").lower()
+    strategies = [
+        {
+            "keys": ["step", "terrace"],
+            "title": "Stepped / Terraced Massing",
+            "note": "Lower the solar-critical edge and use upper setbacks as exposed PV roof planes.",
+            "blocks": [(0, 0, 0, 86, 54, 95), (68, 0, 0, 86, 54, 65), (136, 0, 0, 86, 54, 36)],
+            "sun": "south sun",
+        },
+        {
+            "keys": ["split", "bar"],
+            "title": "Split-Bar Massing",
+            "note": "Break a bulky block into thinner bars to reduce self-shading and expose more facade/roof area.",
+            "blocks": [(0, 0, 0, 70, 48, 78), (130, 0, 0, 70, 48, 78)],
+            "sun": "gap for light",
+        },
+        {
+            "keys": ["courtyard", "void", "carve", "subtractive"],
+            "title": "Subtractive / Courtyard Massing",
+            "note": "Start from the allowed volume, then carve a void where it improves solar and daylight access.",
+            "blocks": [(0, 0, 0, 62, 50, 76), (62, 0, 0, 62, 50, 76), (124, 0, 0, 62, 50, 76), (0, 78, 0, 62, 50, 76), (124, 78, 0, 62, 50, 76)],
+            "sun": "carved void",
+        },
+        {
+            "keys": ["setback", "spacing", "distance"],
+            "title": "Increase Setback",
+            "note": "Open distance from a tall obstruction before treating the shaded facade as a main PV surface.",
+            "blocks": [(0, 0, 0, 70, 54, 110), (165, 0, 0, 78, 54, 62)],
+            "sun": "setback",
+        },
+        {
+            "keys": ["north", "shift height", "shift the height", "dense program"],
+            "title": "Shift Height Northward",
+            "note": "Keep taller program volume away from the solar-critical south edge.",
+            "blocks": [(10, 0, 0, 86, 54, 45), (102, 0, 0, 86, 54, 105)],
+            "sun": "lower south edge",
+        },
+        {
+            "keys": ["stilt", "lift"],
+            "title": "Lifted / Stilted Massing",
+            "note": "Lift part of the volume to reduce ground-level obstruction and improve porosity/daylight.",
+            "blocks": [(32, 0, 52, 154, 54, 50)],
+            "stilts": True,
+            "sun": "open ground",
+        },
+    ]
+
+    selected = []
+    for strategy in strategies:
+        if any(key in content for key in strategy["keys"]):
+            selected.append(strategy)
+    if not selected:
+        return
+    selected = selected[:3]
+
+    def block_html(block):
+        x, y, z, w, d, h = block
+        return (
+            f'<div class="iso-block" style="--x:{x}px;--y:{y}px;--z:{z}px;'
+            f'--w:{w}px;--d:{d}px;--h:{h}px;"></div>'
+        )
+
+    cards = []
+    for strategy in selected:
+        blocks = "".join(block_html(b) for b in strategy["blocks"])
+        stilts = ""
+        if strategy.get("stilts"):
+            for sx in [48, 168]:
+                stilts += f'<div class="stilt" style="--sx:{sx}px;"></div>'
+        cards.append(f"""
+        <section class="sketch-card">
+          <div class="sketch-title">{strategy['title']}</div>
+          <div class="scene-wrap">
+            <div class="sun-arrow">{strategy['sun']} →</div>
+            <div class="iso-scene">{blocks}{stilts}</div>
+          </div>
+          <div class="sketch-note">{strategy['note']}</div>
+        </section>
+        """)
+
+    html = f"""
+    <style>
+      .sketch-grid {{
+        display:grid;
+        grid-template-columns:repeat({len(cards)}, minmax(0, 1fr));
+        gap:14px;
+        margin:8px 0 18px 0;
+        font-family:Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+      }}
+      .sketch-card {{
+        border:1px solid #e0dcd4;
+        background:#fffdf8;
+        border-radius:8px;
+        padding:12px 12px 10px 12px;
+        min-height:230px;
+      }}
+      .sketch-title {{
+        color:#2d3142;
+        font-size:14px;
+        font-weight:650;
+        margin-bottom:4px;
+      }}
+      .scene-wrap {{
+        height:145px;
+        position:relative;
+        overflow:hidden;
+      }}
+      .sun-arrow {{
+        position:absolute;
+        left:6px;
+        top:10px;
+        color:#c8a96e;
+        font-size:11px;
+        font-weight:650;
+        text-transform:uppercase;
+        letter-spacing:.04em;
+      }}
+      .iso-scene {{
+        position:absolute;
+        left:50%;
+        top:96px;
+        width:260px;
+        height:140px;
+        transform:translateX(-50%) rotateX(58deg) rotateZ(-38deg);
+        transform-style:preserve-3d;
+      }}
+      .iso-block {{
+        position:absolute;
+        left:var(--x);
+        top:var(--y);
+        width:var(--w);
+        height:var(--d);
+        transform:translateZ(var(--z));
+        transform-style:preserve-3d;
+        background:#d8bf84;
+        outline:1px solid rgba(45,49,66,.18);
+      }}
+      .iso-block:before {{
+        content:"";
+        position:absolute;
+        left:0;
+        top:0;
+        width:100%;
+        height:var(--h);
+        background:#b9a06b;
+        transform-origin:top;
+        transform:rotateX(-90deg);
+        outline:1px solid rgba(45,49,66,.14);
+      }}
+      .iso-block:after {{
+        content:"";
+        position:absolute;
+        right:0;
+        top:0;
+        width:var(--h);
+        height:100%;
+        background:#8fbf9f;
+        transform-origin:right;
+        transform:rotateY(90deg);
+        outline:1px solid rgba(45,49,66,.14);
+      }}
+      .stilt {{
+        position:absolute;
+        left:var(--sx);
+        top:18px;
+        width:8px;
+        height:8px;
+        background:#2d3142;
+        transform:translateZ(0);
+      }}
+      .stilt:before {{
+        content:"";
+        position:absolute;
+        width:8px;
+        height:54px;
+        background:#2d3142;
+        transform-origin:top;
+        transform:rotateX(-90deg);
+      }}
+      .sketch-note {{
+        color:#5f6675;
+        font-size:12px;
+        line-height:1.35;
+      }}
+      @media (max-width: 760px) {{
+        .sketch-grid {{ grid-template-columns:1fr; }}
+      }}
+    </style>
+    <div class="sketch-grid">{''.join(cards)}</div>
+    """
+    components.html(html, height=285 if len(cards) <= 3 else 560, scrolling=False)
 
 
 def build_system_prompt(skill_md, cea_summary, output_mode, scale, selected_buildings=None, skill_id=None, cea_data=None):
@@ -1887,6 +2129,12 @@ else:
                 st.markdown('<div class="bubble-ai">', unsafe_allow_html=True)
                 st.markdown(msg["content"])
                 st.markdown('</div><div class="clearfix"></div>', unsafe_allow_html=True)
+                if i == 1:
+                    render_massing_strategy_sketches(
+                        msg["content"],
+                        st.session_state.skill_id,
+                        st.session_state.get("tree_mode")
+                    )
                 # Render chart inline after first AI response only
                 if (i == 1
                         and st.session_state.skill_id
