@@ -2666,4 +2666,3 @@ else:
                     response = call_llm(system_prompt, recent_history)
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
                 st.rerun()
-
