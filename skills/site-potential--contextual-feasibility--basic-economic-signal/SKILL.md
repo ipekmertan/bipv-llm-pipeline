@@ -77,6 +77,14 @@ Basic economic signal is a **location-level** analysis — the same economic con
 
 ## Output Modes
 
+The three output modes must complement each other:
+
+- **Key takeaway** = decision and priorities: whether the BIPV argument should be economic, carbon-driven, regulatory, or architectural.
+- **Explain the numbers** = evidence and terminology: electricity price, export value, grid carbon, cost range, payback range, and what each means.
+- **Design implication** = action recipe: how to size, frame, phase, and present BIPV to the client based on the economic context.
+
+Each mode must be understandable on its own, but it should not repeat the full content of the other two modes. If two modes would produce nearly the same answer, state the overlap clearly and shift the emphasis rather than repeating.
+
 ### If "Explain the numbers" selected:
 **What the LLM produces:**
 - Current electricity price for the location with source and date
@@ -84,6 +92,9 @@ Basic economic signal is a **location-level** analysis — the same economic con
 - Typical BIPV installation cost range for the market
 - Typical payback period range for the location
 - Whether electricity prices are trending up or down
+- Keep economic terminology where useful (e.g. electricity tariff, export compensation, simple payback, grid carbon intensity, capital cost), but define it briefly in simple words.
+- Do not repeat the Key takeaway wording. This mode is for the evidence behind the economic signal.
+- Do not give the full design/client strategy; only state what each number controls architecturally or financially.
 
 **Visualization:** Economic context dashboard
 - Four key indicators shown as a simple scorecard
@@ -97,6 +108,10 @@ Basic economic signal is a **location-level** analysis — the same economic con
 - One headline: overall economic signal for the location
 - The dominant argument for BIPV in this context — is it economic, carbon-driven, or regulatory?
 - One sentence on the biggest economic risk or opportunity
+- Use formal, professional, non-expert language.
+- Lead with the client/design argument, not a full list of prices and rates.
+- Include only the one or two most important numbers that support the signal.
+- Do not repeat the full payback/cost/tariff breakdown.
 
 **Visualization:** Signal summary card
 - Overall signal (Strong / Marginal / Weak)
@@ -113,6 +128,9 @@ Basic economic signal is a **location-level** analysis — the same economic con
 - If both weak: flag that the BIPV case may need to rest on architectural quality and regulatory compliance
 - Sizing recommendation: in weak economic contexts, recommend right-sizing for self-consumption only rather than export
 - Links to LCOE and Carbon Payback skills for detailed financial and carbon analysis
+- Focus on actions: which argument to lead with, whether to right-size or expand PV, whether to prioritise self-consumption, and how to avoid overpromising savings.
+- Use only the minimum economic values needed to justify each action.
+- Do not re-explain every number from Explain the numbers.
 
 **Visualization:** Argument framing diagram
 - Three argument tracks: Economic / Carbon / Architectural
@@ -129,6 +147,14 @@ Basic economic signal is a **location-level** analysis — the same economic con
 - **This is not financial advice:** Always include a note that this is an early orientation only and detailed financial analysis should be done by a qualified energy consultant.
 
 ---
+
+## References
+
+- CEA4 weather file location extraction
+- IDP 2024 Team 8: noted that Shanghai electricity prices (~0.3–0.6 yuan/kWh) made PV economics challenging — grid carbon intensity was the stronger argument
+- IDP 2024 Team 2: used Chinese grid carbon intensity (0.45 kgCO2/kWh) as key input for LCA analysis
+- Interview — Interviewee B: wanted "scenario suggestions based on context — climate, policy, etc."
+- Interview — Interviewee C: "Electricity in China is relatively cheap — it doesn't always make sense to install PV on every surface"
 
 ## References
 
