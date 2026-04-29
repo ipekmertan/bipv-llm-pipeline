@@ -1,9 +1,9 @@
 ---
-name: optimize-my-design--panel-type-tradeoff
-description: Use when the architect wants to compare BIPV panel types across efficiency, cost, embodied carbon, and actual yield for their specific project. Reads CEA PV yield outputs for all simulated panel types and the CEA panel database to produce a multi-criteria comparison.
-intent: Help the architect choose the right panel technology for their specific project context by comparing all simulated panel types across the metrics that matter for design decisions — not just efficiency, but cost, carbon, yield, and architectural suitability.
-type: component
-position_in_tree: "Goal → Optimize My Design → Panel Type Trade-off"
+name: "optimize-my-design--panel-type-tradeoff"
+description: "Use when the architect wants to compare BIPV panel types across efficiency, cost, embodied carbon, and actual yield for their specific project. Reads CEA PV yield outputs for all simulated panel types and the CEA panel database to produce a multi-criteria comparison."
+intent: "Help the architect choose the right panel technology for their specific project context by comparing all simulated panel types across the metrics that matter for design decisions — not just efficiency, but cost, carbon, yield, and architectural suitability."
+type: "component"
+position_in_tree: "Goal → Performance Estimation → Panel Type Trade-off"
 ---
 
 ## Purpose
