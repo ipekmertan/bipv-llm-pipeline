@@ -1628,6 +1628,175 @@ def compute_panel_tradeoff_metrics(cea_data, selected_buildings=None):
     return "\n".join(lines)
 
 
+def _sum_hourly_demand_series(files, selected_buildings=None):
+    demand_frames = []
+    if selected_buildings:
+        for bname in selected_buildings:
+            df = files.get(f"{bname}.csv")
+            if df is not None:
+                demand_frames.append(df)
+    else:
+        demand_frames = [
+            df for fname, df in files.items()
+            if fname.startswith("B") and fname.endswith(".csv") and len(fname) <= 10
+        ]
+
+    series = None
+    source = None
+    for df in demand_frames:
+        col = _find_metric_col(df, "E_sys_kWh", "GRID", "E_tot")
+        if not col:
+            continue
+        values = pd.to_numeric(df[col], errors="coerce").fillna(0).reset_index(drop=True)
+        series = values if series is None else series.add(values, fill_value=0)
+        source = "selected building hourly demand files" if selected_buildings else "all building hourly demand files"
+
+    if series is not None:
+        return series, source
+
+    total_df = files.get("Total_demand_hourly.csv")
+    if total_df is None:
+        total_df = files.get("Total_demand.csv")
+    total_col = _find_metric_col(total_df, "E_sys_kWh", "GRID", "E_tot", "total") if total_df is not None else None
+    if total_df is not None and total_col:
+        return pd.to_numeric(total_df[total_col], errors="coerce").fillna(0).reset_index(drop=True), "total demand file"
+
+    return None, None
+
+
+def compute_basic_economic_project_screen(cea_data, selected_buildings=None):
+    files = cea_data.get("files", {})
+    weather_header = files.get("weather_header", "")
+    template_name, template = _select_economic_template(weather_header)
+    if not template:
+        return ""
+
+    currency = template.get("currency", "EUR")
+    sym = template.get("currency_symbol", "€")
+
+    pv_fname = next((k for k in files
+                     if k.startswith("PV_PV") and k.endswith("_total.csv")
+                     and "buildings" not in k), None)
+    if not pv_fname:
+        return "Project-specific early BIPV economic screen: no PV hourly total file was found, so project generation/value cannot be calculated."
+
+    pv_df = files.get(pv_fname)
+    pv_col = _find_metric_col(pv_df, "E_PV_gen", "E_PV", "gen") if pv_df is not None else None
+    if pv_df is None or not pv_col:
+        return "Project-specific early BIPV economic screen: PV generation column was not found in the PV result file."
+
+    pv_buildings_df = files.get(pv_fname.replace("_total.csv", "_total_buildings.csv"))
+    selected_pv_df = pv_buildings_df
+    name_col = _find_metric_col(pv_buildings_df, "name", "building") if pv_buildings_df is not None else None
+    if selected_buildings and pv_buildings_df is not None and name_col:
+        selected_pv_df = pv_buildings_df[pv_buildings_df[name_col].isin(selected_buildings)].copy()
+
+    pv_b_col = _find_metric_col(selected_pv_df, "E_PV_gen", "E_PV", "gen") if selected_pv_df is not None else None
+    if selected_pv_df is not None and pv_b_col and not selected_pv_df.empty:
+        annual_pv_kwh = float(pd.to_numeric(selected_pv_df[pv_b_col], errors="coerce").fillna(0).sum())
+    else:
+        annual_pv_kwh = float(pd.to_numeric(pv_df[pv_col], errors="coerce").fillna(0).sum())
+
+    district_pv_kwh = float(pd.to_numeric(pv_df[pv_col], errors="coerce").fillna(0).sum())
+    pv_scale = annual_pv_kwh / district_pv_kwh if district_pv_kwh > 0 else 1.0
+    pv_hourly = pd.to_numeric(pv_df[pv_col], errors="coerce").fillna(0).reset_index(drop=True) * pv_scale
+
+    demand_hourly, demand_source = _sum_hourly_demand_series(files, selected_buildings)
+    annual_demand_kwh = float(demand_hourly.sum()) if demand_hourly is not None else None
+    if demand_hourly is not None and len(demand_hourly) and len(pv_hourly):
+        n = min(len(demand_hourly), len(pv_hourly))
+        self_consumed_kwh = float(pd.concat([pv_hourly.iloc[:n], demand_hourly.iloc[:n]], axis=1).min(axis=1).sum())
+        exported_kwh = max(annual_pv_kwh - self_consumed_kwh, 0.0)
+        self_consumption_note = f"hourly overlap of scaled PV generation and {demand_source}"
+    else:
+        self_consumed_kwh = None
+        exported_kwh = None
+        self_consumption_note = "hourly demand was not available"
+
+    roof_area = facade_area = 0.0
+    if selected_pv_df is not None and not selected_pv_df.empty:
+        roof_col = _find_metric_col(selected_pv_df, "PV_roofs_top_m2")
+        if roof_col:
+            roof_area = float(pd.to_numeric(selected_pv_df[roof_col], errors="coerce").fillna(0).sum())
+        for direction in ["south", "east", "west", "north"]:
+            col = _find_metric_col(selected_pv_df, f"PV_walls_{direction}_m2")
+            if col:
+                facade_area += float(pd.to_numeric(selected_pv_df[col], errors="coerce").fillna(0).sum())
+
+    roof_cost_lo = template.get("bipv_cost_roof_m2_low")
+    roof_cost_hi = template.get("bipv_cost_roof_m2_high")
+    facade_cost_lo = template.get("bipv_cost_facade_m2_low")
+    facade_cost_hi = template.get("bipv_cost_facade_m2_high")
+    investment_lo = investment_hi = None
+    if (roof_area + facade_area) > 0 and all(v is not None for v in [roof_cost_lo, roof_cost_hi, facade_cost_lo, facade_cost_hi]):
+        investment_lo = roof_area * float(roof_cost_lo) + facade_area * float(facade_cost_lo)
+        investment_hi = roof_area * float(roof_cost_hi) + facade_area * float(facade_cost_hi)
+
+    use_fractions, dominant_use = detect_building_use_types(cea_data, selected_buildings)
+    use_prices = template.get("electricity_by_use_type", {})
+    tariff = None
+    tariff_note = ""
+    if use_fractions and use_prices:
+        weighted = 0.0
+        weight_sum = 0.0
+        for use, fraction in use_fractions.items():
+            price = use_prices.get(use, {}).get("price")
+            if price is not None:
+                weighted += float(price) * float(fraction)
+                weight_sum += float(fraction)
+        if weight_sum > 0:
+            tariff = weighted / weight_sum
+            tariff_note = "weighted by detected building use type mix"
+    if tariff is None and dominant_use and use_prices.get(dominant_use, {}).get("price") is not None:
+        tariff = float(use_prices[dominant_use]["price"])
+        tariff_note = f"dominant detected use type: {dominant_use}"
+    if tariff is None and template.get("electricity_price_kwh") is not None:
+        tariff = float(template["electricity_price_kwh"])
+        tariff_note = "regional baseline tariff"
+
+    export_comp = template.get("export_compensation_kwh")
+    annual_value = None
+    if self_consumed_kwh is not None and tariff is not None:
+        annual_value = self_consumed_kwh * tariff
+        if exported_kwh is not None and export_comp is not None:
+            annual_value += exported_kwh * float(export_comp)
+
+    payback_lo = payback_hi = None
+    if investment_lo is not None and investment_hi is not None and annual_value and annual_value > 0:
+        payback_lo = investment_lo / annual_value
+        payback_hi = investment_hi / annual_value
+
+    lines = [
+        f"Project-specific early BIPV economic screen ({currency}, from {template_name.replace('_', ' ').title()} baseline):",
+        f"- Simulated active PV area: roof {_format_number(roof_area, ' m2', 1)}; facade {_format_number(facade_area, ' m2', 1)}.",
+        f"- Annual PV generation from CEA: {_format_number(annual_pv_kwh, ' kWh/year')}.",
+    ]
+    if annual_demand_kwh is not None:
+        lines.append(f"- Annual electricity demand used for value screen: {_format_number(annual_demand_kwh, ' kWh/year')}.")
+    if self_consumed_kwh is not None:
+        sc_pct = self_consumed_kwh / annual_pv_kwh * 100 if annual_pv_kwh > 0 else None
+        lines.append(
+            f"- Hourly self-consumption estimate: {_format_number(self_consumed_kwh, ' kWh/year')} "
+            f"({_format_number(sc_pct, '% of PV generation', 1)}) from {self_consumption_note}."
+        )
+        lines.append(f"- Exported surplus estimate: {_format_number(exported_kwh, ' kWh/year')}.")
+    if investment_lo is not None and investment_hi is not None:
+        lines.append(
+            f"- Installed BIPV investment screen: {sym} {_format_number(investment_lo, '', 0)}–{sym} {_format_number(investment_hi, '', 0)} "
+            f"(roof {sym} {roof_cost_lo}–{sym} {roof_cost_hi}/m2; facade {sym} {facade_cost_lo}–{sym} {facade_cost_hi}/m2)."
+        )
+    if tariff is not None:
+        export_text = f"; export compensation {sym} {float(export_comp):.2f}/kWh" if export_comp is not None else "; export value not hardcoded"
+        lines.append(f"- Value assumptions: electricity tariff {sym} {tariff:.2f}/kWh ({tariff_note}){export_text}.")
+    if annual_value is not None:
+        lines.append(f"- Estimated annual electricity value: {sym} {_format_number(annual_value, '', 0)}/year.")
+    if payback_lo is not None and payback_hi is not None:
+        lines.append(f"- Simple payback screen from project data: {_format_number(payback_lo, ' years', 1)}–{_format_number(payback_hi, ' years', 1)}.")
+    lines.append(f"Currency rule: all user-facing money values must stay in {currency} ({sym}); convert any web result in another currency before presenting it.")
+
+    return "\n".join(lines)
+
+
 def compute_contextual_feasibility_metrics(skill_id, cea_data, selected_buildings=None, scale="District"):
     files = cea_data.get("files", {})
     city, country = _parse_weather_place(files.get("weather_header", ""))
@@ -1685,10 +1854,14 @@ def compute_contextual_feasibility_metrics(skill_id, cea_data, selected_building
             "This is an internet-first contextual feasibility skill. CEA supplies the project location only; public market/energy sources supply the useful context.",
             "Interpret public facts into early BIPV positioning: whether the strongest argument is electricity savings, carbon reduction, regulation/compliance, architectural value, resilience, or client-image value.",
             "Contextual feasibility retrieval logic: use local/city facts when found; if local facts are missing, use national context; if national facts are missing, use regional/continental context; if that is missing, use industry-average benchmarks only. Always label the level of certainty. Broader benchmarks can guide early client framing but cannot replace project tariffs or quotes.",
-            "Benchmarks for orientation only: electricity price >0.20 EUR/kWh suggests stronger savings potential; 0.10-0.20 is marginal; <0.10 is weak. Grid carbon >0.4 kgCO2/kWh strengthens the carbon argument; 0.2-0.4 is moderate; <0.2 is weaker. Typical payback <8 years is strong; 8-15 is marginal; >15 is weak.",
-            "If exact local tariffs, export compensation, BIPV cost range, or payback data are missing, do not invent them. Add a short precision note at the end naming the utility/energy authority or cost consultant and asking for tariff category, export compensation, installed BIPV cost/m2, subsidy eligibility, and expected payback assumptions.",
+            "Use the project-specific early BIPV economic screen below when available. It is more useful than generic consultation boilerplate because it combines simulated PV area/generation with local-currency tariff and BIPV cost assumptions.",
+            "Benchmarks for orientation only: higher electricity prices strengthen the savings argument; high grid carbon strengthens the carbon argument; simple payback below 8 years is strong, 8-15 is workable, and above 15 years usually needs a carbon, regulatory, or architectural-value argument.",
+            "If exact local tariffs, export compensation, BIPV cost range, or payback data are missing, do not invent them. Add a short precision note only after the main answer, naming the utility/energy authority or cost consultant and asking for the exact tariff category, export compensation, subsidy eligibility, and installed BIPV quote assumptions.",
             "Mode split: Key insight gives the client/design argument and priorities; Explain the numbers gives tariffs, carbon, cost, payback, and source evidence; Design implication gives sizing, framing, self-consumption/export strategy, and what not to overpromise."
         ])
+        project_screen = compute_basic_economic_project_screen(cea_data, selected_buildings)
+        if project_screen:
+            lines.append(project_screen)
     return "\n".join(lines)
 
 
@@ -1844,6 +2017,27 @@ def _template_match_score(template, city, country):
         if item and item.lower() in haystack:
             score += 4
     return score
+
+
+def _select_economic_template(weather_header):
+    templates = load_economic_context()
+    if not templates:
+        return "generic", {}
+
+    city, country = _parse_weather_place(weather_header)
+    best_name = "generic"
+    best_score = -1
+    for name, template in templates.items():
+        if name == "generic":
+            continue
+        score = _template_match_score(template, city, country)
+        if score > best_score:
+            best_name = name
+            best_score = score
+
+    if best_score <= 0:
+        best_name = "generic"
+    return best_name, templates.get(best_name, templates.get("generic", {}))
 
 
 def _format_infrastructure_template(name, template):
@@ -2033,25 +2227,7 @@ def detect_building_use_types(cea_data, selected_buildings=None):
 
 def regional_economic_context(weather_header, cea_data=None, selected_buildings=None):
     """Return hardcoded economic baseline for the project location and building use type."""
-    templates = load_economic_context()
-    if not templates:
-        return ""
-
-    city, country = _parse_weather_place(weather_header)
-    best_name = "generic"
-    best_score = -1
-    for name, template in templates.items():
-        if name == "generic":
-            continue
-        score = _template_match_score(template, city, country)
-        if score > best_score:
-            best_name = name
-            best_score = score
-
-    if best_score <= 0:
-        best_name = "generic"
-
-    t = templates.get(best_name, templates.get("generic", {}))
+    best_name, t = _select_economic_template(weather_header)
     if not t:
         return ""
 
@@ -2677,7 +2853,18 @@ No charts.
 - Do not explain what the numbers are — use only the minimum number needed to justify the action."""
     }
 
-    mode_block = mode_instructions.get(output_mode, f"Output mode: {output_mode}")
+    if skill_id == "site-potential--contextual-feasibility--regulatory-constraints":
+        mode_block = """OUTPUT MODE: Regulatory brief
+Regulatory Constraints is a single-output endpoint. Do not split the answer into Key takeaway, Explain the numbers, and Design implication.
+- Give one concise regulatory brief for early BIPV design.
+- Start with the overall stance: Permissive, Moderate, Restrictive, or Unknown / needs local confirmation.
+- Include only the rules or constraints supported by supplied public context or computed project data.
+- Use local facts first; if only national, regional, or industry-average guidance is supplied, label that scale clearly.
+- Include source website addresses for the public facts used.
+- Convert the regulatory context into a clear design consequence: what to change, reserve, avoid, document, or verify now.
+- If exact parcel-specific information is missing, add one short precision note naming who to contact and exactly what to ask. Do not let the whole answer become a caveat."""
+    else:
+        mode_block = mode_instructions.get(output_mode, f"Output mode: {output_mode}")
 
     compact_metrics = None
     if skill_id in COMPACT_SKILL_TASKS and cea_data is not None:
@@ -3214,7 +3401,14 @@ else:
         )
         if skill_ready:
             st.markdown("")
-            if st.session_state.tree_mode:
+            if st.session_state.skill_id == "site-potential--contextual-feasibility--regulatory-constraints":
+                if st.session_state.tree_mode != "Regulatory brief":
+                    st.session_state.tree_mode = "Regulatory brief"
+                    st.session_state.analysis_ran = False
+                    st.session_state.cached_system_prompt = None
+                    st.rerun()
+                st.markdown("**Output** · *Regulatory brief*")
+            elif st.session_state.tree_mode:
                 st.markdown(f"**Output mode** · *{st.session_state.tree_mode}*")
             else:
                 st.markdown("**Step 5 — How do you want the answer?**")
