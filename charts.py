@@ -520,6 +520,7 @@ def chart_panel_type_tradeoff(cea_data, selected_buildings, output_mode):
 
     panel_colors = ["#c8a96e", "#7ec8a0", "#e07b5a", "#6b8fd6", "#a0a0a0"]
     monthly_rows = []
+    daily_rows = []
     summary_rows = []
 
     for pv_fname in pv_fnames:
@@ -536,6 +537,7 @@ def chart_panel_type_tradeoff(cea_data, selected_buildings, output_mode):
         district_annual = float(pd.to_numeric(df_pv[gen_col], errors="coerce").fillna(0).sum())
         annual_kwh = district_annual
         area_m2 = None
+        pv_scale = 1.0
 
         bldg_fname = pv_fname.replace("_total.csv", "_total_buildings.csv")
         df_b = cea_data["files"].get(bldg_fname)
@@ -548,7 +550,8 @@ def chart_panel_type_tradeoff(cea_data, selected_buildings, output_mode):
             if gen_b_col and not df_use.empty:
                 annual_kwh = float(pd.to_numeric(df_use[gen_b_col], errors="coerce").fillna(0).sum())
                 if district_annual > 0:
-                    monthly = monthly * (annual_kwh / district_annual)
+                    pv_scale = annual_kwh / district_annual
+                    monthly = monthly * pv_scale
 
             area_cols = [
                 c for c in df_use.columns
@@ -565,6 +568,24 @@ def chart_panel_type_tradeoff(cea_data, selected_buildings, output_mode):
                 "Generation (MWh)": float(mwh),
             })
 
+        date_col = _find_col(df_pv, "date", "Date", "time")
+        if date_col:
+            work = df_pv.copy()
+            work["_dt"] = pd.to_datetime(work[date_col], utc=True, errors="coerce")
+            work["_hour"] = work["_dt"].dt.hour
+            hourly_avg = (
+                pd.to_numeric(work[gen_col], errors="coerce").fillna(0)
+                .groupby(work["_hour"]).mean()
+                * pv_scale / 1000
+            )
+            hourly_avg = hourly_avg.reindex(range(24), fill_value=0)
+            for hour, mwh in hourly_avg.items():
+                daily_rows.append({
+                    "Panel type": panel_type,
+                    "Hour": int(hour),
+                    "Average generation (MWh)": float(mwh),
+                })
+
         annual_mwh = annual_kwh / 1000
         summary_rows.append({
             "Panel type": panel_type,
@@ -573,27 +594,13 @@ def chart_panel_type_tradeoff(cea_data, selected_buildings, output_mode):
             "Yield (kWh/m2/year)": annual_kwh / area_m2 if area_m2 and area_m2 > 0 else None,
         })
 
-    if not monthly_rows or not summary_rows:
+    if not monthly_rows or not daily_rows:
         return None
 
     df_monthly = pd.DataFrame(monthly_rows)
-    df_summary = pd.DataFrame(summary_rows)
-    panel_order = sorted(df_summary["Panel type"].unique())
+    df_daily = pd.DataFrame(daily_rows)
+    panel_order = sorted(df_monthly["Panel type"].unique())
     color_range = panel_colors[:len(panel_order)]
-
-    annual_bar = alt.Chart(df_summary).mark_bar(
-        cornerRadiusTopLeft=3, cornerRadiusTopRight=3
-    ).encode(
-        x=alt.X("Panel type:N", sort=panel_order, title="Panel type"),
-        y=alt.Y("Annual generation (MWh):Q", title="MWh/year"),
-        color=alt.Color("Panel type:N", scale=alt.Scale(domain=panel_order, range=color_range), legend=None),
-        tooltip=[
-            "Panel type",
-            alt.Tooltip("Annual generation (MWh):Q", format=",.1f", title="MWh/year"),
-            alt.Tooltip("Installed area (m2):Q", format=",.1f", title="m2"),
-            alt.Tooltip("Yield (kWh/m2/year):Q", format=",.1f", title="kWh/m2/year"),
-        ],
-    ).properties(title="Annual PV generation by panel type", height=220)
 
     monthly_line = alt.Chart(df_monthly).mark_line(point=True, strokeWidth=2).encode(
         x=alt.X("Month:N", sort=MONTHS, title=""),
@@ -610,7 +617,23 @@ def chart_panel_type_tradeoff(cea_data, selected_buildings, output_mode):
         ],
     ).properties(title="Monthly generation by panel type", height=220)
 
-    return annual_bar | monthly_line
+    daily_line = alt.Chart(df_daily).mark_line(strokeWidth=2).encode(
+        x=alt.X("Hour:Q", title="Hour of day", scale=alt.Scale(domain=[0, 23]),
+                axis=alt.Axis(tickMinStep=1)),
+        y=alt.Y("Average generation (MWh):Q", title="MWh (avg)"),
+        color=alt.Color(
+            "Panel type:N",
+            scale=alt.Scale(domain=panel_order, range=color_range),
+            legend=alt.Legend(title="Panel type")
+        ),
+        tooltip=[
+            "Panel type",
+            "Hour",
+            alt.Tooltip("Average generation (MWh):Q", format=",.3f", title="Avg MWh"),
+        ],
+    ).properties(title="Average daily generation profile by panel type", height=220)
+
+    return monthly_line | daily_line
 
 
 def chart_self_sufficiency(cea_data, selected_buildings, output_mode):
@@ -632,6 +655,19 @@ def chart_self_sufficiency(cea_data, selected_buildings, output_mode):
     if gen_col is None or date_col is None:
         return None
 
+    pv_scale = 1.0
+    if selected_buildings:
+        bldg_fname = pv_fname.replace("_total.csv", "_total_buildings.csv")
+        df_b_scale = cea_data["files"].get(bldg_fname)
+        name_col_scale = _find_col(df_b_scale, "name", "Name", "building") if df_b_scale is not None else None
+        gen_b_col_scale = _find_col(df_b_scale, "E_PV_gen", "E_PV", "gen") if df_b_scale is not None else None
+        if df_b_scale is not None and name_col_scale and gen_b_col_scale:
+            selected_df = df_b_scale[df_b_scale[name_col_scale].isin(selected_buildings)]
+            selected_annual = pd.to_numeric(selected_df[gen_b_col_scale], errors="coerce").fillna(0).sum()
+            district_annual = pd.to_numeric(df_pv[gen_col], errors="coerce").fillna(0).sum()
+            if district_annual > 0 and selected_annual > 0:
+                pv_scale = float(selected_annual / district_annual)
+
     # Aggregate demand from building files
     demand_files = [
         v for k, v in cea_data["files"].items()
@@ -643,15 +679,23 @@ def chart_self_sufficiency(cea_data, selected_buildings, output_mode):
     try:
         df_pv["_dt"] = pd.to_datetime(df_pv[date_col], utc=True, errors="coerce")
         df_pv["month"] = df_pv["_dt"].dt.month
-        monthly_pv = df_pv.groupby("month")[gen_col].sum() / 1000
+        monthly_pv = df_pv.groupby("month")[gen_col].sum() * pv_scale / 1000
 
         if demand_files:
             demand_col = _find_col(demand_files[0], "E_sys", "GRID", "E_tot")
             if demand_col:
-                total_demand = sum(d[demand_col].values for d in demand_files
-                                   if demand_col in d.columns)
+                demand_series = None
+                for d in demand_files:
+                    d_col = _find_col(d, "E_sys", "GRID", "E_tot")
+                    if d_col:
+                        values = pd.to_numeric(d[d_col], errors="coerce").fillna(0).reset_index(drop=True)
+                        demand_series = values if demand_series is None else demand_series.add(values, fill_value=0)
+                if demand_series is None:
+                    return None
                 df_demand = df_pv.copy()
-                df_demand["_demand"] = total_demand
+                n = min(len(df_demand), len(demand_series))
+                df_demand = df_demand.iloc[:n].copy()
+                df_demand["_demand"] = demand_series.iloc[:n].values
                 monthly_demand = df_demand.groupby("month")["_demand"].sum() / 1000
             else:
                 return None
@@ -723,32 +767,177 @@ def chart_self_sufficiency(cea_data, selected_buildings, output_mode):
         return None
 
 
-def chart_carbon(cea_data, selected_buildings, output_mode):
-    """
-    Carbon impact skills.
-    All modes → carbon payback timeline bar/line combo
-    """
-    # Need PV area + generation + grid emissions to estimate payback
+def _grid_carbon_factor_kgco2_kwh(cea_data):
+    grid_df = cea_data["files"].get("GRID.csv")
+    em_col = _find_col(grid_df, "GHG_kgCO2MJ", "CO2", "co2", "emission", "GHG") if grid_df is not None else None
+    if em_col and grid_df is not None:
+        try:
+            value = float(pd.to_numeric(grid_df[em_col], errors="coerce").dropna().iloc[0])
+            return value * 3.6 if "MJ" in em_col else value
+        except Exception:
+            pass
+    return 0.4
+
+
+def _demand_series_for_scope(cea_data, selected_buildings):
+    demand_files = [
+        v for k, v in cea_data["files"].items()
+        if k.startswith("B") and k.endswith(".csv") and len(k) <= 10
+        and (not selected_buildings or k.replace(".csv", "") in selected_buildings)
+    ]
+    demand_series = None
+    for df in demand_files:
+        d_col = _find_col(df, "E_sys", "GRID", "E_tot")
+        if d_col:
+            values = pd.to_numeric(df[d_col], errors="coerce").fillna(0).reset_index(drop=True)
+            demand_series = values if demand_series is None else demand_series.add(values, fill_value=0)
+    return demand_series
+
+
+def _pv_scope_from_first_total(cea_data, selected_buildings):
     pv_fname = next((k for k in cea_data["files"]
                      if k.startswith("PV_PV") and "_total.csv" in k
                      and "buildings" not in k), None)
     if pv_fname is None:
         return None
 
-    df_pv = cea_data["files"][pv_fname]
+    df_pv = cea_data["files"][pv_fname].copy()
     gen_col = _find_col(df_pv, "E_PV_gen", "E_PV", "gen")
-    area_col = _find_col(df_pv, "area", "m2", "Area")
     if gen_col is None:
         return None
 
-    annual_gen_kwh = df_pv[gen_col].sum()
+    district_annual = float(pd.to_numeric(df_pv[gen_col], errors="coerce").fillna(0).sum())
+    annual_kwh = district_annual
+    area_m2 = None
+    roof_area_m2 = 0.0
+    facade_area_m2 = 0.0
+    scale = 1.0
+
+    bldg_fname = pv_fname.replace("_total.csv", "_total_buildings.csv")
+    df_b = cea_data["files"].get(bldg_fname)
+    if df_b is not None:
+        name_col = _find_col(df_b, "name", "Name", "building")
+        gen_b_col = _find_col(df_b, "E_PV_gen", "E_PV", "gen")
+        df_use = df_b.copy()
+        if selected_buildings and name_col:
+            df_use = df_use[df_use[name_col].isin(selected_buildings)]
+        if gen_b_col and not df_use.empty:
+            annual_kwh = float(pd.to_numeric(df_use[gen_b_col], errors="coerce").fillna(0).sum())
+            if district_annual > 0:
+                scale = annual_kwh / district_annual
+
+        roof_col = _find_col(df_use, "PV_roofs_top_m2")
+        if roof_col:
+            roof_area_m2 = float(pd.to_numeric(df_use[roof_col], errors="coerce").fillna(0).sum())
+        for direction in ["south", "east", "west", "north"]:
+            col = _find_col(df_use, f"PV_walls_{direction}_m2")
+            if col:
+                facade_area_m2 += float(pd.to_numeric(df_use[col], errors="coerce").fillna(0).sum())
+        area_m2 = roof_area_m2 + facade_area_m2
+        if area_m2 <= 0:
+            area_cols = [
+                c for c in df_use.columns
+                if c.endswith("_m2") and ("PV_roofs" in c or "PV_walls" in c or "area_PV" in c)
+            ]
+            if area_cols:
+                area_m2 = float(sum(pd.to_numeric(df_use[c], errors="coerce").fillna(0).sum() for c in area_cols))
+
+    return {
+        "pv_fname": pv_fname,
+        "df_pv": df_pv,
+        "gen_col": gen_col,
+        "annual_kwh": annual_kwh,
+        "district_annual_kwh": district_annual,
+        "scale": scale,
+        "area_m2": area_m2,
+        "roof_area_m2": roof_area_m2,
+        "facade_area_m2": facade_area_m2,
+    }
+
+
+def chart_carbon_footprint(cea_data, selected_buildings, output_mode):
+    """
+    Electricity carbon footprint: baseline grid electricity vs BIPV avoided carbon.
+    """
+    pv_fname = next((k for k in cea_data["files"]
+                     if k.startswith("PV_PV") and "_total.csv" in k
+                     and "buildings" not in k), None)
+    if pv_fname is None:
+        return None
+
+    df_pv = cea_data["files"][pv_fname].copy()
+    gen_col = _find_col(df_pv, "E_PV_gen", "E_PV", "gen")
+    if gen_col is None:
+        return None
+
+    district_annual = pd.to_numeric(df_pv[gen_col], errors="coerce").fillna(0).sum()
+    pv_scale = 1.0
+    if selected_buildings:
+        bldg_fname = pv_fname.replace("_total.csv", "_total_buildings.csv")
+        df_b = cea_data["files"].get(bldg_fname)
+        name_col = _find_col(df_b, "name", "Name", "building") if df_b is not None else None
+        gen_b_col = _find_col(df_b, "E_PV_gen", "E_PV", "gen") if df_b is not None else None
+        if df_b is not None and name_col and gen_b_col:
+            selected_df = df_b[df_b[name_col].isin(selected_buildings)]
+            selected_annual = pd.to_numeric(selected_df[gen_b_col], errors="coerce").fillna(0).sum()
+            if district_annual > 0 and selected_annual > 0:
+                pv_scale = float(selected_annual / district_annual)
+
+    pv_hourly = pd.to_numeric(df_pv[gen_col], errors="coerce").fillna(0).reset_index(drop=True) * pv_scale
+    demand_hourly = _demand_series_for_scope(cea_data, selected_buildings)
+    if demand_hourly is None or len(demand_hourly) == 0:
+        return None
+
+    n = min(len(pv_hourly), len(demand_hourly))
+    pv_hourly = pv_hourly.iloc[:n].reset_index(drop=True)
+    demand_hourly = demand_hourly.iloc[:n].reset_index(drop=True)
+
+    grid_carbon = _grid_carbon_factor_kgco2_kwh(cea_data)
+    baseline_tco2 = float(demand_hourly.sum() * grid_carbon / 1000)
+    avoided_tco2 = float(pd.concat([pv_hourly, demand_hourly], axis=1).min(axis=1).sum() * grid_carbon / 1000)
+    net_tco2 = max(baseline_tco2 - avoided_tco2, 0)
+    reduction = avoided_tco2 / baseline_tco2 if baseline_tco2 > 0 else 0
+
+    df_chart = pd.DataFrame({
+        "Metric": ["Grid-electricity baseline", "Avoided by BIPV", "Net after BIPV"],
+        "tCO2/year": [baseline_tco2, avoided_tco2, net_tco2],
+        "Type": ["baseline", "avoided", "net"],
+    })
+
+    chart = alt.Chart(df_chart).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
+        x=alt.X("Metric:N", title="", sort=["Grid-electricity baseline", "Avoided by BIPV", "Net after BIPV"],
+                axis=alt.Axis(labelAngle=0)),
+        y=alt.Y("tCO2/year:Q", title="tCO2/year"),
+        color=alt.Color(
+            "Type:N",
+            scale=alt.Scale(domain=["baseline", "avoided", "net"], range=[C_DEMAND, C_SURPLUS, C_CARBON]),
+            legend=None
+        ),
+        tooltip=[
+            "Metric",
+            alt.Tooltip("tCO2/year:Q", format=",.1f"),
+        ],
+    ).properties(
+        title=f"Electricity carbon footprint — BIPV avoids {reduction:.0%}",
+        height=240
+    )
+    return chart
+
+
+def chart_carbon(cea_data, selected_buildings, output_mode):
+    """
+    Carbon impact skills.
+    All modes → carbon payback timeline bar/line combo
+    """
+    scope = _pv_scope_from_first_total(cea_data, selected_buildings)
+    if scope is None:
+        return None
+
+    annual_gen_kwh = scope["annual_kwh"]
     if annual_gen_kwh <= 0:
         return None
 
-    # Read grid emissions from GRID.csv
-    grid_df = cea_data["files"].get("GRID.csv")
-    em_col = _find_col(grid_df, "CO2", "co2", "emission", "GHG") if grid_df is not None else None
-    em_grid = float(grid_df[em_col].iloc[0]) if (em_col and grid_df is not None) else 0.4
+    em_grid = _grid_carbon_factor_kgco2_kwh(cea_data)
 
     # Estimate embodied carbon — use PV panel data if available
     panel_df = cea_data["files"].get("PHOTOVOLTAIC_PANELS.csv")
@@ -761,7 +950,9 @@ def chart_carbon(cea_data, selected_buildings, output_mode):
             except Exception:
                 pass
 
-    total_area = df_pv[area_col].sum() if area_col else 1000
+    total_area = scope["area_m2"]
+    if not total_area or total_area <= 0:
+        return None
     embodied_total = em_bipv * total_area  # kgCO2
     annual_avoided = annual_gen_kwh * em_grid  # kgCO2/yr
 
@@ -826,34 +1017,36 @@ def chart_economic(cea_data, selected_buildings, output_mode):
     Explain numbers  → cumulative cashflow line over 25yr
     Design impl.     → cumulative cashflow + cost breakdown
     """
-    pv_fname = next((k for k in cea_data["files"]
-                     if k.startswith("PV_PV") and "_total.csv" in k
-                     and "buildings" not in k), None)
-    if pv_fname is None:
+    scope = _pv_scope_from_first_total(cea_data, selected_buildings)
+    if scope is None:
         return None
 
-    df_pv = cea_data["files"][pv_fname]
-    gen_col = _find_col(df_pv, "E_PV_gen", "E_PV", "gen")
-    area_col = _find_col(df_pv, "area", "m2", "Area")
-    if gen_col is None:
+    annual_gen_kwh = scope["annual_kwh"]
+    total_area = scope["area_m2"]
+    if not total_area or total_area <= 0:
         return None
-
-    annual_gen_kwh = df_pv[gen_col].sum()
-    total_area = df_pv[area_col].sum() if area_col else 1000
 
     # Rough cost estimate — read from panel data if available
     panel_df = cea_data["files"].get("PHOTOVOLTAIC_PANELS.csv")
     cost_per_m2 = 254.0  # default €/m2 (PV1 roof from McCarty)
-    if panel_df is not None:
+    roof_cost_m2 = facade_cost_m2 = None
+    if panel_df is not None and not panel_df.empty:
+        roof_col = _find_col(panel_df, "cost_roof", "roof")
+        facade_col = _find_col(panel_df, "cost_facade", "facade")
         cost_col = _find_col(panel_df, "cost", "Cost", "CAPEX", "price")
-        if cost_col:
-            try:
+        try:
+            roof_cost_m2 = float(panel_df[roof_col].iloc[0]) if roof_col else None
+            facade_cost_m2 = float(panel_df[facade_col].iloc[0]) if facade_col else None
+            if cost_col:
                 cost_per_m2 = float(panel_df[cost_col].iloc[0])
-            except Exception:
-                pass
+        except Exception:
+            pass
 
     electricity_price = 0.28  # €/kWh typical CH
-    total_cost = cost_per_m2 * total_area
+    if roof_cost_m2 is not None and facade_cost_m2 is not None and (scope["roof_area_m2"] + scope["facade_area_m2"]) > 0:
+        total_cost = scope["roof_area_m2"] * roof_cost_m2 + scope["facade_area_m2"] * facade_cost_m2
+    else:
+        total_cost = cost_per_m2 * total_area
     annual_savings = annual_gen_kwh * electricity_price
     payback_yr = total_cost / annual_savings if annual_savings > 0 else 25
 
@@ -865,11 +1058,11 @@ def chart_economic(cea_data, selected_buildings, output_mode):
 
     if output_mode == "Key takeaway":
         df_sum = pd.DataFrame({
-            "Item": ["Total investment", "Annual savings (10yr)", "Annual savings (25yr)"],
-            "€": [total_cost, annual_savings * 10, annual_savings * 25],
+            "Item": ["Estimated investment", "Annual energy value", "25-year energy value"],
+            "€": [total_cost, annual_savings, annual_savings * 25],
         })
         df_sum["bar_color"] = df_sum["Item"].apply(
-            lambda item: C_CARBON if item == "Total investment" else C_SURPLUS
+            lambda item: C_CARBON if item == "Estimated investment" else C_SURPLUS
         )
         bar = alt.Chart(df_sum).mark_bar(cornerRadiusTopLeft=3,
                                           cornerRadiusTopRight=3).encode(
@@ -899,6 +1092,19 @@ def chart_economic(cea_data, selected_buildings, output_mode):
         title=f"Cumulative cashflow over 25 years (payback ~{payback_yr:.1f} yr)",
         height=220
     )
+    if output_mode == "Explain the numbers":
+        df_cost = pd.DataFrame({
+            "Category": ["Estimated investment", "Annual energy value"],
+            "€": [total_cost, annual_savings],
+            "bar_color": [C_CARBON, C_SURPLUS],
+        })
+        cost_bar = alt.Chart(df_cost).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
+            x=alt.X("Category:N", title="", axis=alt.Axis(labelAngle=0)),
+            y=alt.Y("€:Q", title="€"),
+            color=alt.Color("bar_color:N", scale=None, legend=None),
+            tooltip=["Category", alt.Tooltip("€:Q", format=",.0f")]
+        ).properties(title="Investment and annual value", height=220)
+        return cost_bar | chart
     return chart
 
 
@@ -1048,7 +1254,7 @@ SKILL_CHART_MAP = {
     # Self-sufficiency
     "performance-estimation--self-sufficiency":                             chart_self_sufficiency,
     # Carbon
-    "impact-and-viability--carbon-impact--operational-carbon-footprint":    chart_carbon,
+    "impact-and-viability--carbon-impact--carbon-footprint":                chart_carbon_footprint,
     "impact-and-viability--carbon-impact--carbon-payback":                  chart_carbon,
     # Economic
     "impact-and-viability--economic-viability--cost-analysis":              chart_economic,
