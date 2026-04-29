@@ -382,9 +382,23 @@ def chart_energy_generation(cea_data, selected_buildings, output_mode):
     if gen_col is None:
         return None
 
+    pv_scale = 1.0
+    if selected_buildings:
+        bldg_fname = pv_fname.replace("_total.csv", "_total_buildings.csv")
+        df_b_scale = cea_data["files"].get(bldg_fname)
+        name_col_scale = _find_col(df_b_scale, "name", "Name", "building") if df_b_scale is not None else None
+        gen_b_col_scale = _find_col(df_b_scale, "E_PV_gen", "E_PV", "gen") if df_b_scale is not None else None
+        if df_b_scale is not None and name_col_scale and gen_b_col_scale:
+            selected_df = df_b_scale[df_b_scale[name_col_scale].isin(selected_buildings)]
+            selected_annual = pd.to_numeric(selected_df[gen_b_col_scale], errors="coerce").fillna(0).sum()
+            district_annual = pd.to_numeric(df_pv[gen_col], errors="coerce").fillna(0).sum()
+            if district_annual > 0 and selected_annual > 0:
+                pv_scale = float(selected_annual / district_annual)
+
     monthly = _monthly_from_hourly(df_pv, gen_col)
     if monthly is None:
         return None
+    monthly = monthly * pv_scale
 
     df_monthly = pd.DataFrame({
         "Month": MONTHS, "Generation (MWh)": monthly.values
@@ -409,7 +423,7 @@ def chart_energy_generation(cea_data, selected_buildings, output_mode):
             try:
                 df_pv["_dt"] = pd.to_datetime(df_pv[date_col], utc=True, errors="coerce")
                 df_pv["hour"] = df_pv["_dt"].dt.hour
-                hourly_avg = df_pv.groupby("hour")[gen_col].mean() / 1000
+                hourly_avg = df_pv.groupby("hour")[gen_col].mean() * pv_scale / 1000
                 df_hourly = pd.DataFrame({
                     "Hour": hourly_avg.index,
                     "Avg generation (MWh)": hourly_avg.values
@@ -490,6 +504,113 @@ def chart_energy_generation(cea_data, selected_buildings, output_mode):
                 return monthly_bar | donut
 
         return monthly_bar
+
+
+def chart_panel_type_tradeoff(cea_data, selected_buildings, output_mode):
+    """
+    Panel type trade-off.
+    Shows all simulated PV panel options together so PV1/PV2/PV3/PV4 can be compared directly.
+    """
+    pv_fnames = sorted(
+        k for k in cea_data["files"]
+        if k.startswith("PV_PV") and k.endswith("_total.csv") and "buildings" not in k
+    )
+    if not pv_fnames:
+        return None
+
+    panel_colors = ["#c8a96e", "#7ec8a0", "#e07b5a", "#6b8fd6", "#a0a0a0"]
+    monthly_rows = []
+    summary_rows = []
+
+    for pv_fname in pv_fnames:
+        df_pv = cea_data["files"][pv_fname].copy()
+        gen_col = _find_col(df_pv, "E_PV_gen", "E_PV", "gen")
+        if gen_col is None:
+            continue
+
+        panel_type = pv_fname.replace("PV_", "").replace("_total.csv", "")
+        monthly = _monthly_from_hourly(df_pv, gen_col)
+        if monthly is None:
+            continue
+
+        district_annual = float(pd.to_numeric(df_pv[gen_col], errors="coerce").fillna(0).sum())
+        annual_kwh = district_annual
+        area_m2 = None
+
+        bldg_fname = pv_fname.replace("_total.csv", "_total_buildings.csv")
+        df_b = cea_data["files"].get(bldg_fname)
+        if df_b is not None:
+            name_col = _find_col(df_b, "name", "Name", "building")
+            gen_b_col = _find_col(df_b, "E_PV_gen", "E_PV", "gen")
+            df_use = df_b.copy()
+            if selected_buildings and name_col:
+                df_use = df_use[df_use[name_col].isin(selected_buildings)]
+            if gen_b_col and not df_use.empty:
+                annual_kwh = float(pd.to_numeric(df_use[gen_b_col], errors="coerce").fillna(0).sum())
+                if district_annual > 0:
+                    monthly = monthly * (annual_kwh / district_annual)
+
+            area_cols = [
+                c for c in df_use.columns
+                if c.endswith("_m2") and ("PV_roofs" in c or "PV_walls" in c or "area_PV" in c)
+            ]
+            if area_cols and not df_use.empty:
+                area_m2 = float(sum(pd.to_numeric(df_use[c], errors="coerce").fillna(0).sum() for c in area_cols))
+
+        for month_num, mwh in monthly.items():
+            monthly_rows.append({
+                "Panel type": panel_type,
+                "Month": MONTHS[int(month_num) - 1],
+                "month_num": int(month_num),
+                "Generation (MWh)": float(mwh),
+            })
+
+        annual_mwh = annual_kwh / 1000
+        summary_rows.append({
+            "Panel type": panel_type,
+            "Annual generation (MWh)": annual_mwh,
+            "Installed area (m2)": area_m2,
+            "Yield (kWh/m2/year)": annual_kwh / area_m2 if area_m2 and area_m2 > 0 else None,
+        })
+
+    if not monthly_rows or not summary_rows:
+        return None
+
+    df_monthly = pd.DataFrame(monthly_rows)
+    df_summary = pd.DataFrame(summary_rows)
+    panel_order = sorted(df_summary["Panel type"].unique())
+    color_range = panel_colors[:len(panel_order)]
+
+    annual_bar = alt.Chart(df_summary).mark_bar(
+        cornerRadiusTopLeft=3, cornerRadiusTopRight=3
+    ).encode(
+        x=alt.X("Panel type:N", sort=panel_order, title="Panel type"),
+        y=alt.Y("Annual generation (MWh):Q", title="MWh/year"),
+        color=alt.Color("Panel type:N", scale=alt.Scale(domain=panel_order, range=color_range), legend=None),
+        tooltip=[
+            "Panel type",
+            alt.Tooltip("Annual generation (MWh):Q", format=",.1f", title="MWh/year"),
+            alt.Tooltip("Installed area (m2):Q", format=",.1f", title="m2"),
+            alt.Tooltip("Yield (kWh/m2/year):Q", format=",.1f", title="kWh/m2/year"),
+        ],
+    ).properties(title="Annual PV generation by panel type", height=220)
+
+    monthly_line = alt.Chart(df_monthly).mark_line(point=True, strokeWidth=2).encode(
+        x=alt.X("Month:N", sort=MONTHS, title=""),
+        y=alt.Y("Generation (MWh):Q", title="MWh"),
+        color=alt.Color(
+            "Panel type:N",
+            scale=alt.Scale(domain=panel_order, range=color_range),
+            legend=alt.Legend(title="Panel type")
+        ),
+        tooltip=[
+            "Panel type",
+            "Month",
+            alt.Tooltip("Generation (MWh):Q", format=",.1f", title="MWh"),
+        ],
+    ).properties(title="Monthly generation by panel type", height=220)
+
+    return annual_bar | monthly_line
 
 
 def chart_self_sufficiency(cea_data, selected_buildings, output_mode):
@@ -920,7 +1041,7 @@ SKILL_CHART_MAP = {
     "site-potential--massing-and-shading-strategy":                         chart_massing_shading,
     # Energy generation
     "performance-estimation--energy-generation":                            chart_energy_generation,
-    "performance-estimation--panel-type-tradeoff":                          chart_energy_generation,
+    "performance-estimation--panel-type-tradeoff":                          chart_panel_type_tradeoff,
     "optimize-my-design--surface-prioritization":                           chart_energy_generation,
     "optimize-my-design--envelope-simplification":                          chart_energy_generation,
     "optimize-my-design--construction-and-integration":                     chart_energy_generation,
@@ -947,4 +1068,3 @@ def render_skill_chart(skill_id, cea_data, selected_buildings, output_mode):
         return fn(cea_data, selected_buildings, output_mode)
     except Exception:
         return None
-
