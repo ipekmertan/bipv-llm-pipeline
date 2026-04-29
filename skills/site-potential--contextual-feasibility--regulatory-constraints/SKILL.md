@@ -1,8 +1,8 @@
 ---
-name: site-potential--contextual-feasibility--regulatory-constraints
-description: Use when the architect wants to understand planning rules, permits, approval risks, height limits, heritage restrictions, or facade/roof BIPV regulatory constraints for the project location.
-intent: Turn location-specific planning and regulatory context into early BIPV design constraints: where BIPV is likely straightforward, where it may require approval, and what the architect should reserve or document before the concept becomes fixed.
-type: component
+name: "site-potential--contextual-feasibility--regulatory-constraints"
+description: "Use when the architect wants to understand planning rules, permits, approval risks, height limits, heritage restrictions, or facade/roof BIPV regulatory constraints for the project location."
+intent: "Turn location-specific planning and regulatory context into early BIPV design constraints: where BIPV is likely straightforward, where it may require approval, and what the architect should reserve or document before the concept becomes fixed."
+type: "component"
 position_in_tree: "Goal -> Site Potential -> Contextual Feasibility -> Regulatory Constraints"
 ---
 
