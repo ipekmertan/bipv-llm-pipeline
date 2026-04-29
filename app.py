@@ -31,7 +31,7 @@ SKILL_SIMULATION_MAP = {
     "optimize-my-design--envelope-simplification": ["pv"],
     "optimize-my-design--construction-and-integration": ["pv"],
     "performance-estimation--self-sufficiency": ["pv", "demand"],
-    "impact-and-viability--carbon-impact--operational-carbon-footprint": ["pv", "demand"],
+    "impact-and-viability--carbon-impact--carbon-footprint": ["pv", "demand"],
     "impact-and-viability--carbon-impact--carbon-payback": ["pv", "demand"],
     "impact-and-viability--economic-viability--cost-analysis": ["pv", "demand"],
     "impact-and-viability--economic-viability--investment-payback": ["pv", "demand"],
@@ -163,8 +163,20 @@ def _read_dbf_records(dbf_path):
     return records
 
 
-def _read_shp_bboxes(shp_path):
-    bboxes = []
+def _polygon_area_and_perimeter(points):
+    if len(points) < 3:
+        return 0.0, 0.0
+    area = 0.0
+    perimeter = 0.0
+    for i, (x1, y1) in enumerate(points):
+        x2, y2 = points[(i + 1) % len(points)]
+        area += x1 * y2 - x2 * y1
+        perimeter += math.hypot(x2 - x1, y2 - y1)
+    return abs(area) / 2.0, perimeter
+
+
+def _read_shp_geometry_metrics(shp_path):
+    metrics = []
     try:
         with open(shp_path, "rb") as f:
             f.seek(100)
@@ -179,26 +191,56 @@ def _read_shp_bboxes(shp_path):
                 shape_type = struct.unpack("<i", content[:4])[0]
                 if shape_type in (3, 5, 8, 13, 15, 18, 23, 25, 28, 31) and len(content) >= 36:
                     minx, miny, maxx, maxy = struct.unpack("<4d", content[4:36])
-                    bboxes.append({
+                    bbox_area = max(0, (maxx - minx) * (maxy - miny))
+                    area = None
+                    perimeter = None
+                    if shape_type == 5 and len(content) >= 44:
+                        try:
+                            num_parts, num_points = struct.unpack("<2i", content[36:44])
+                            parts_start = 44
+                            points_start = parts_start + 4 * num_parts
+                            parts = list(struct.unpack(f"<{num_parts}i", content[parts_start:points_start]))
+                            points = [
+                                struct.unpack("<2d", content[points_start + i * 16:points_start + (i + 1) * 16])
+                                for i in range(num_points)
+                            ]
+                            part_areas = []
+                            part_perimeters = []
+                            for part_idx, start in enumerate(parts):
+                                end = parts[part_idx + 1] if part_idx + 1 < len(parts) else len(points)
+                                ring_area, ring_perimeter = _polygon_area_and_perimeter(points[start:end])
+                                part_areas.append(ring_area)
+                                part_perimeters.append(ring_perimeter)
+                            if part_areas:
+                                area = sum(part_areas)
+                                perimeter = sum(part_perimeters)
+                        except Exception:
+                            area = None
+                            perimeter = None
+                    metrics.append({
                         "minx": minx,
                         "miny": miny,
                         "maxx": maxx,
                         "maxy": maxy,
+                        "bbox_width_m": max(0, maxx - minx),
+                        "bbox_depth_m": max(0, maxy - miny),
                         "centroid_x": (minx + maxx) / 2,
                         "centroid_y": (miny + maxy) / 2,
-                        "footprint_m2": max(0, (maxx - minx) * (maxy - miny)),
+                        "footprint_m2": area if area is not None and area > 0 else bbox_area,
+                        "footprint_bbox_m2": bbox_area,
+                        "footprint_perimeter_m": perimeter,
                     })
                 else:
-                    bboxes.append({})
+                    metrics.append({})
     except Exception:
         return []
-    return bboxes
+    return metrics
 
 
 def _read_geometry_table(shp_path):
     dbf_path = shp_path.with_suffix(".dbf")
     records = _read_dbf_records(dbf_path)
-    bboxes = _read_shp_bboxes(shp_path)
+    bboxes = _read_shp_geometry_metrics(shp_path)
     rows = []
     for idx, record in enumerate(records):
         row = dict(record)
@@ -512,6 +554,36 @@ COMPACT_SKILL_TASKS = {
         "If precise utility data is missing, keep the main answer useful and add only a short precision note "
         "saying who to contact and exactly what to ask."
     ),
+    "performance-estimation--energy-generation": (
+        "Interpret the PV generation result for the selected analysis scope. Focus on total annual generation, "
+        "peak generation, generation intensity, strongest/weakest month, average daily generation window, and "
+        "roof/facade contribution to total PV output. Do not reuse district totals for selected buildings or clusters. "
+        "Do not repeat Solar Irradiation's placement ranking except where it explains the total generation result."
+    ),
+    "performance-estimation--self-sufficiency": (
+        "Interpret how much of the selected scope's electricity demand is covered by BIPV. Focus on direct hourly "
+        "self-sufficiency, annual PV coverage before timing losses, self-consumption, exported surplus, grid import, "
+        "monthly dependency, and daily mismatch. Use selected building/cluster demand files when supplied; never use "
+        "district totals or irradiation values as the selected building result."
+    ),
+    "impact-and-viability--carbon-impact--carbon-footprint": (
+        "Interpret the selected scope's annual electricity-carbon footprint and how much BIPV reduces it. Focus on "
+        "baseline grid-electricity carbon, hourly PV used on site, BIPV avoided carbon, net electricity carbon after "
+        "BIPV, and annual reduction percentage. Do not discuss panel manufacturing carbon or carbon payback years."
+    ),
+    "impact-and-viability--carbon-impact--carbon-payback": (
+        "Interpret the selected scope's carbon payback period: active PV area, embodied panel carbon, annual avoided "
+        "carbon, and years until avoided operational carbon offsets panel manufacturing carbon. Respect the selected "
+        "scale and do not use district totals for building/cluster results."
+    ),
+    "impact-and-viability--economic-viability--cost-analysis": (
+        "Interpret the selected scope's BIPV cost screen: active roof/facade PV area, estimated investment, annual "
+        "electricity value, and cost competitiveness. Respect the selected scale and use the project-specific screen."
+    ),
+    "impact-and-viability--economic-viability--investment-payback": (
+        "Interpret the selected scope's BIPV payback screen: estimated investment, annual value, simple payback, and "
+        "25-year return direction. Respect the selected scale and use the project-specific screen."
+    ),
     "site-potential--contextual-feasibility--regulatory-constraints": (
         "Combine the project location with supplied public planning/regulatory context to turn BIPV rules into "
         "early design choices: whether roof/facade BIPV is likely straightforward, restricted, mandatory, "
@@ -574,6 +646,24 @@ def _format_number(value, unit="", decimals=0):
         return f"{float(value):,.{decimals}f}{unit}"
     except Exception:
         return "not available"
+
+
+MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def _monthly_from_hourly(df, col):
+    date_col = _find_metric_col(df, "date", "time")
+    if df is None or col is None or date_col is None:
+        return None
+    try:
+        work = df.copy()
+        work["_dt"] = pd.to_datetime(work[date_col], utc=True, errors="coerce")
+        work["_month"] = work["_dt"].dt.month
+        monthly = pd.to_numeric(work[col], errors="coerce").fillna(0).groupby(work["_month"]).sum() / 1000
+        return monthly.reindex(range(1, 13), fill_value=0)
+    except Exception:
+        return None
 
 
 def compute_daily_pattern_metrics(cea_data):
@@ -984,6 +1074,155 @@ def _height_value(row, col):
     if "floor" in col.lower():
         return value * 3.2
     return value
+
+
+def compute_building_surface_area_values(cea_data, selected_buildings=None):
+    """Approximate physical roof/facade areas from zone geometry and WWR."""
+    files = cea_data.get("files", {})
+    zone_df = files.get("zone_geometry.csv")
+    if zone_df is None or zone_df.empty:
+        return None
+
+    zone = zone_df.copy()
+    name_col = _find_metric_col(zone, "name", "building")
+    if selected_buildings and name_col:
+        zone = zone[zone[name_col].isin(selected_buildings)]
+    if zone.empty:
+        return None
+
+    envelope = files.get("envelope.csv")
+    if envelope is not None:
+        envelope = envelope.copy()
+        env_name_col = _find_metric_col(envelope, "name", "building")
+        if selected_buildings and env_name_col:
+            envelope = envelope[envelope[env_name_col].isin(selected_buildings)]
+
+    def avg_wwr(col):
+        if envelope is None or col not in envelope.columns:
+            return None
+        vals = pd.to_numeric(envelope[col], errors="coerce").dropna()
+        return float(vals.mean()) if len(vals) else None
+
+    wwr = {
+        "south": avg_wwr("wwr_south"),
+        "east": avg_wwr("wwr_east"),
+        "west": avg_wwr("wwr_west"),
+        "north": avg_wwr("wwr_north"),
+    }
+
+    height_col = _height_col(zone)
+    roof_area = facade_gross_fallback = 0.0
+    south_gross = east_gross = west_gross = north_gross = 0.0
+
+    for _, row in zone.iterrows():
+        h = _height_value(row, height_col) or 0.0
+        roof_area += float(row.get("footprint_m2", 0) or 0)
+        width = float(row.get("bbox_width_m", 0) or 0)
+        depth = float(row.get("bbox_depth_m", 0) or 0)
+        if width > 0 and depth > 0 and h > 0:
+            south_gross += width * h
+            north_gross += width * h
+            east_gross += depth * h
+            west_gross += depth * h
+        else:
+            perimeter = float(row.get("footprint_perimeter_m", 0) or 0)
+            facade_gross_fallback += perimeter * h
+
+    directional = {
+        "South facade": (south_gross, wwr["south"]),
+        "East facade": (east_gross, wwr["east"]),
+        "West facade": (west_gross, wwr["west"]),
+        "North facade": (north_gross, wwr["north"]),
+    }
+    directional_total = sum(gross for gross, _ in directional.values())
+    facade_gross = directional_total if directional_total > 0 else facade_gross_fallback
+    facade_opaque = sum(
+        gross * (1 - ratio) if ratio is not None else gross
+        for gross, ratio in directional.values()
+    ) if directional_total > 0 else facade_gross_fallback
+
+    return {
+        "roof_area_m2": roof_area,
+        "facade_gross_m2": facade_gross,
+        "facade_opaque_m2": facade_opaque,
+        "directional_facades": directional,
+    }
+
+
+def compute_active_pv_area_values(cea_data, selected_buildings=None):
+    """Read CEA's simulated active module area from PV result files."""
+    files = cea_data.get("files", {})
+    pv_fname = next((k for k in files
+                     if k.startswith("PV_PV") and k.endswith("_total_buildings.csv")), None)
+    if not pv_fname:
+        return None
+
+    df = files.get(pv_fname)
+    if df is None or df.empty:
+        return None
+    df = df.copy()
+    name_col = _find_metric_col(df, "name", "building")
+    if selected_buildings and name_col:
+        df = df[df[name_col].isin(selected_buildings)]
+    if df.empty:
+        return None
+
+    def sum_col(col):
+        if col not in df.columns:
+            return 0.0
+        return float(pd.to_numeric(df[col], errors="coerce").fillna(0).sum())
+
+    roof = sum_col("PV_roofs_top_m2")
+    facades = {
+        "South facade": sum_col("PV_walls_south_m2"),
+        "East facade": sum_col("PV_walls_east_m2"),
+        "West facade": sum_col("PV_walls_west_m2"),
+        "North facade": sum_col("PV_walls_north_m2"),
+    }
+    facade_total = sum(facades.values())
+    total_col = _find_metric_col(df, "area_PV_m2", "Area_PV")
+    total = sum_col(total_col) if total_col else roof + facade_total
+    if total <= 0:
+        total = roof + facade_total
+
+    return {
+        "source": pv_fname,
+        "roof_m2": roof,
+        "facade_m2": facade_total,
+        "total_m2": total,
+        "directional_facades": facades,
+    }
+
+
+def compute_building_surface_area_screen(cea_data, selected_buildings=None):
+    values = compute_building_surface_area_values(cea_data, selected_buildings)
+    if not values:
+        return []
+    active = compute_active_pv_area_values(cea_data, selected_buildings)
+
+    rows = [f"- Approximate physical roof footprint: {_format_number(values['roof_area_m2'], ' m2', 1)}."]
+    facade_gross = values["facade_gross_m2"]
+    facade_opaque = values["facade_opaque_m2"]
+    directional = values["directional_facades"]
+    if facade_gross > 0:
+        rows.append(f"- Approximate gross facade area: {_format_number(facade_gross, ' m2', 1)}.")
+        rows.append(f"- Approximate opaque facade area after WWR: {_format_number(facade_opaque, ' m2', 1)}.")
+        for label, (gross, ratio) in directional.items():
+            if gross > 0:
+                opaque = gross * (1 - ratio) if ratio is not None else gross
+                ratio_text = _format_number(ratio * 100, '% WWR', 0) if ratio is not None else "WWR not available"
+                rows.append(f"- {label}: gross {_format_number(gross, ' m2', 1)}; opaque {_format_number(opaque, ' m2', 1)} ({ratio_text}).")
+    if active:
+        roof_ratio = active["roof_m2"] / values["roof_area_m2"] * 100 if values["roof_area_m2"] > 0 else None
+        facade_ratio = active["facade_m2"] / facade_opaque * 100 if facade_opaque > 0 else None
+        rows.append(
+            f"- CEA simulated active PV module area: roof {_format_number(active['roof_m2'], ' m2', 1)} "
+            f"({_format_number(roof_ratio, '% of physical roof footprint', 1)}); facade "
+            f"{_format_number(active['facade_m2'], ' m2', 1)} "
+            f"({_format_number(facade_ratio, '% of approximate opaque facade area', 1)})."
+        )
+    rows.append("Area note: physical roof/facade areas are geometry-based approximations from zone.shp plus envelope WWR. CEA PV area is simulated active module area after radiation threshold, panel spacing, and PV placement filters; it is not the same as fully covering every roof/facade square metre.")
+    return rows
 
 
 def _bbox_gap(a, b):
@@ -1540,6 +1779,392 @@ def compute_infrastructure_readiness_metrics(cea_data, selected_buildings=None, 
     return "\n".join(lines)
 
 
+def compute_energy_generation_metrics(cea_data, selected_buildings=None, scale="District"):
+    files = cea_data.get("files", {})
+    pv_fname = next((k for k in files
+                     if k.startswith("PV_PV") and k.endswith("_total.csv")
+                     and "buildings" not in k), None)
+    if not pv_fname:
+        return "No PV total hourly file is available, so energy generation cannot be calculated reliably."
+
+    pv_df = files.get(pv_fname)
+    gen_col = _find_metric_col(pv_df, "E_PV_gen", "E_PV", "gen") if pv_df is not None else None
+    if pv_df is None or gen_col is None:
+        return f"{pv_fname} is available, but no PV generation column was found."
+
+    district_annual_kwh = float(pd.to_numeric(pv_df[gen_col], errors="coerce").fillna(0).sum())
+    annual_kwh = district_annual_kwh
+    pv_scale = 1.0
+    scope_source = f"{pv_fname} district hourly total"
+    surface_source = None
+    area_m2 = None
+    surface_rows = []
+
+    bldg_fname = pv_fname.replace("_total.csv", "_total_buildings.csv")
+    pv_b = files.get(bldg_fname)
+    if pv_b is not None:
+        name_col = _find_metric_col(pv_b, "name", "building")
+        gen_b_col = _find_metric_col(pv_b, "E_PV_gen", "E_PV", "gen")
+        pv_scope = pv_b.copy()
+        if selected_buildings and name_col:
+            pv_scope = pv_scope[pv_scope[name_col].isin(selected_buildings)]
+            scope_source = f"{bldg_fname} filtered to selected building(s), with hourly profile scaled from {pv_fname}"
+        elif scale in ("Building", "Cluster") and selected_buildings:
+            scope_source = f"{pv_fname}; selected building filter could not be applied because no name column was found in {bldg_fname}"
+
+        if gen_b_col and not pv_scope.empty:
+            annual_kwh = float(pd.to_numeric(pv_scope[gen_b_col], errors="coerce").fillna(0).sum())
+            pv_scale = annual_kwh / district_annual_kwh if district_annual_kwh > 0 else 1.0
+
+        area_cols = [c for c in pv_scope.columns if c.endswith("_m2") and ("PV_roofs" in c or "PV_walls" in c or "area_PV" in c)]
+        if area_cols and not pv_scope.empty:
+            area_m2 = float(sum(pd.to_numeric(pv_scope[c], errors="coerce").fillna(0).sum() for c in area_cols))
+
+        surface_defs = [
+            ("Roof", "PV_roofs_top_E_kWh", "PV_roofs_top_m2"),
+            ("South facade", "PV_walls_south_E_kWh", "PV_walls_south_m2"),
+            ("East facade", "PV_walls_east_E_kWh", "PV_walls_east_m2"),
+            ("West facade", "PV_walls_west_E_kWh", "PV_walls_west_m2"),
+            ("North facade", "PV_walls_north_E_kWh", "PV_walls_north_m2"),
+        ]
+        for surface, e_col, a_col in surface_defs:
+            if e_col in pv_scope.columns:
+                kwh = float(pd.to_numeric(pv_scope[e_col], errors="coerce").fillna(0).sum())
+                sqm = float(pd.to_numeric(pv_scope[a_col], errors="coerce").fillna(0).sum()) if a_col in pv_scope.columns else None
+                if kwh > 0 or (sqm is not None and sqm > 0):
+                    surface_rows.append((surface, kwh, sqm, kwh / annual_kwh * 100 if annual_kwh > 0 else None))
+        if surface_rows:
+            surface_source = bldg_fname
+
+    monthly = _monthly_from_hourly(pv_df, gen_col)
+    peak_kw = float(pd.to_numeric(pv_df[gen_col], errors="coerce").fillna(0).max()) * pv_scale
+    date_col = _find_metric_col(pv_df, "date", "time")
+    peak_hour = None
+    meaningful_hours = None
+    if date_col:
+        pv_hourly = pv_df.copy()
+        pv_hourly["_dt"] = pd.to_datetime(pv_hourly[date_col], utc=True, errors="coerce")
+        pv_hourly["_hour"] = pv_hourly["_dt"].dt.hour
+        hourly_avg = pd.to_numeric(pv_hourly[gen_col], errors="coerce").fillna(0).groupby(pv_hourly["_hour"]).mean() * pv_scale
+        if not hourly_avg.empty:
+            peak_hour = int(hourly_avg.idxmax())
+            max_hourly = float(hourly_avg.max())
+            if max_hourly > 0:
+                meaningful_hours = [int(h) for h, v in hourly_avg.items() if v >= max_hourly * 0.1]
+
+    lines = [
+        f"Source: {scope_source}.",
+        f"Scale: {scale}.",
+    ]
+    if selected_buildings:
+        lines.append(f"Selected buildings: {', '.join(selected_buildings)}.")
+    lines.append(f"Annual PV generation for this analysis scope: {_format_number(annual_kwh, ' kWh/year')} ({_format_number(annual_kwh / 1000, ' MWh/year', 1)}).")
+    if selected_buildings:
+        lines.append(f"Important scale rule: do not use the district total of {_format_number(district_annual_kwh, ' kWh/year')} as the selected building/cluster result.")
+    lines.append(f"Peak PV generation for this scope: {_format_number(peak_kw, ' kW', 1)}.")
+    lines.append(f"CEA simulated active PV module area: {_format_number(area_m2, ' m2', 1)}.")
+    if area_m2 and area_m2 > 0:
+        lines.append(f"Generation intensity: {_format_number(annual_kwh / area_m2, ' kWh/m2/year', 1)}.")
+
+    if monthly is not None:
+        monthly_scaled = monthly * pv_scale
+        best_month = int(monthly_scaled.idxmax())
+        weakest_month = int(monthly_scaled.idxmin())
+        lines.append(
+            f"Strongest month: {MONTHS[best_month - 1]} ({_format_number(float(monthly_scaled.loc[best_month]), ' MWh', 1)}). "
+            f"Weakest month: {MONTHS[weakest_month - 1]} ({_format_number(float(monthly_scaled.loc[weakest_month]), ' MWh', 1)})."
+        )
+    if peak_hour is not None:
+        if meaningful_hours:
+            lines.append(f"Average daily profile: peak generation occurs around {peak_hour}:00; meaningful output is roughly from {min(meaningful_hours)}:00 to {max(meaningful_hours)}:00.")
+        else:
+            lines.append(f"Average daily profile: peak generation occurs around {peak_hour}:00.")
+
+    if surface_rows:
+        lines.append(f"Surface contribution breakdown from {surface_source}:")
+        for surface, kwh, sqm, share in sorted(surface_rows, key=lambda r: r[1], reverse=True):
+            lines.append(
+                f"- {surface}: {_format_number(kwh, ' kWh/year')} "
+                f"({_format_number(share, '% of PV generation', 1)}); active area {_format_number(sqm, ' m2', 1)}."
+            )
+    else:
+        lines.append("Surface contribution breakdown was not available from the PV buildings file.")
+
+    lines.append("Interpretation boundary: Energy Generation owns the building-level PV production result. Do not repeat Solar Irradiation's surface-placement ranking except where a surface directly explains the total PV generation.")
+    return "\n".join(lines)
+
+
+def compute_self_sufficiency_metrics(cea_data, selected_buildings=None, scale="District"):
+    files = cea_data.get("files", {})
+    pv_fname = next((k for k in files
+                     if k.startswith("PV_PV") and k.endswith("_total.csv")
+                     and "buildings" not in k), None)
+    if not pv_fname:
+        return "No PV total hourly file is available, so self-sufficiency cannot be calculated reliably."
+
+    pv_df = files.get(pv_fname)
+    gen_col = _find_metric_col(pv_df, "E_PV_gen", "E_PV", "gen") if pv_df is not None else None
+    if pv_df is None or gen_col is None:
+        return f"{pv_fname} is available, but no PV generation column was found."
+
+    district_annual_pv = float(pd.to_numeric(pv_df[gen_col], errors="coerce").fillna(0).sum())
+    annual_pv = district_annual_pv
+    pv_scale = 1.0
+    pv_source = f"{pv_fname} district hourly total"
+
+    bldg_fname = pv_fname.replace("_total.csv", "_total_buildings.csv")
+    pv_b = files.get(bldg_fname)
+    if selected_buildings and pv_b is not None:
+        name_col = _find_metric_col(pv_b, "name", "building")
+        gen_b_col = _find_metric_col(pv_b, "E_PV_gen", "E_PV", "gen")
+        if name_col and gen_b_col:
+            selected_pv = pv_b[pv_b[name_col].isin(selected_buildings)]
+            selected_annual_pv = float(pd.to_numeric(selected_pv[gen_b_col], errors="coerce").fillna(0).sum())
+            if selected_annual_pv > 0:
+                annual_pv = selected_annual_pv
+                pv_scale = annual_pv / district_annual_pv if district_annual_pv > 0 else 1.0
+                pv_source = f"{bldg_fname} filtered to selected building(s), with hourly profile scaled from {pv_fname}"
+
+    demand_hourly, demand_source = _sum_hourly_demand_series(files, selected_buildings)
+    if demand_hourly is None or len(demand_hourly) == 0:
+        return "No hourly electricity demand file was found for the selected scope, so self-sufficiency cannot be calculated reliably."
+
+    pv_hourly = pd.to_numeric(pv_df[gen_col], errors="coerce").fillna(0).reset_index(drop=True) * pv_scale
+    n = min(len(pv_hourly), len(demand_hourly))
+    pv_hourly = pv_hourly.iloc[:n].reset_index(drop=True)
+    demand_hourly = demand_hourly.iloc[:n].reset_index(drop=True)
+
+    annual_demand = float(demand_hourly.sum())
+    annual_pv = float(pv_hourly.sum())
+    self_consumed = float(pd.concat([pv_hourly, demand_hourly], axis=1).min(axis=1).sum())
+    surplus = float((pv_hourly - demand_hourly).clip(lower=0).sum())
+    deficit = float((demand_hourly - pv_hourly).clip(lower=0).sum())
+    direct_self_sufficiency = self_consumed / annual_demand * 100 if annual_demand > 0 else None
+    annual_coverage = annual_pv / annual_demand * 100 if annual_demand > 0 else None
+    self_consumption = self_consumed / annual_pv * 100 if annual_pv > 0 else None
+
+    pv_work = pv_df.iloc[:n].copy()
+    date_col = _find_metric_col(pv_work, "date", "time")
+    monthly_lines = []
+    worst_month = best_month = None
+    if date_col:
+        pv_work["_dt"] = pd.to_datetime(pv_work[date_col], utc=True, errors="coerce")
+        pv_work["_month"] = pv_work["_dt"].dt.month
+        pv_work["_pv"] = pv_hourly.values
+        pv_work["_demand"] = demand_hourly.values
+        monthly = pv_work.groupby("_month")[["_pv", "_demand"]].sum().reindex(range(1, 13), fill_value=0)
+        monthly["_covered"] = monthly[["_pv", "_demand"]].min(axis=1)
+        monthly["_direct_ss"] = monthly.apply(
+            lambda r: (r["_covered"] / r["_demand"] * 100) if r["_demand"] > 0 else None,
+            axis=1
+        )
+        if monthly["_direct_ss"].notna().any():
+            best_month = int(monthly["_direct_ss"].idxmax())
+            worst_month = int(monthly["_direct_ss"].idxmin())
+            monthly_lines.append(
+                f"Best month for direct self-sufficiency: {MONTHS[best_month - 1]} ({_format_number(monthly.loc[best_month, '_direct_ss'], '%', 1)}). "
+                f"Worst month: {MONTHS[worst_month - 1]} ({_format_number(monthly.loc[worst_month, '_direct_ss'], '%', 1)})."
+            )
+
+        pv_work["_hour"] = pv_work["_dt"].dt.hour
+        hourly = pv_work.groupby("_hour")[["_pv", "_demand"]].mean()
+        if not hourly.empty:
+            mismatch = hourly["_demand"] - hourly["_pv"]
+            worst_hour = int(mismatch.idxmax())
+            surplus_hours = [int(h) for h, row in hourly.iterrows() if row["_pv"] > row["_demand"]]
+            if surplus_hours:
+                monthly_lines.append(f"Typical daily mismatch: strongest deficit occurs around {worst_hour}:00; surplus hours occur roughly from {min(surplus_hours)}:00 to {max(surplus_hours)}:00.")
+            else:
+                monthly_lines.append(f"Typical daily mismatch: strongest deficit occurs around {worst_hour}:00; PV rarely exceeds demand in the average hourly profile.")
+
+    lines = [
+        f"Sources: {pv_source}; {demand_source}.",
+        f"Scale: {scale}.",
+    ]
+    if selected_buildings:
+        lines.append(f"Selected buildings: {', '.join(selected_buildings)}.")
+        lines.append(f"Important scale rule: do not use district PV total {_format_number(district_annual_pv, ' kWh/year')} or Total_demand.csv as the selected building/cluster result.")
+    lines.append(f"Annual PV generation for this scope: {_format_number(annual_pv, ' kWh/year')} ({_format_number(annual_pv / 1000, ' MWh/year', 1)}).")
+    lines.append(f"Annual electricity demand for this scope: {_format_number(annual_demand, ' kWh/year')} ({_format_number(annual_demand / 1000, ' MWh/year', 1)}).")
+    lines.append(f"Direct self-sufficiency: {_format_number(direct_self_sufficiency, '%', 1)} of annual demand is covered at the same hour by PV generation.")
+    lines.append(f"Annual PV coverage screen: PV generation equals {_format_number(annual_coverage, '%', 1)} of annual demand before timing losses.")
+    lines.append(f"Self-consumption: {_format_number(self_consumption, '%', 1)} of PV generation is used directly on site.")
+    lines.append(f"Annual exported surplus: {_format_number(surplus, ' kWh/year')} ({_format_number(surplus / 1000, ' MWh/year', 1)}).")
+    lines.append(f"Annual grid import/deficit after hourly PV offset: {_format_number(deficit, ' kWh/year')} ({_format_number(deficit / 1000, ' MWh/year', 1)}).")
+    lines.extend(monthly_lines)
+    lines.append("Interpretation boundary: Self-Sufficiency owns demand matching. Do not use solar irradiation values as PV generation, and do not use district totals when selected buildings are supplied.")
+    return "\n".join(lines)
+
+
+def _grid_carbon_factor_for_metrics(cea_data):
+    grid_df = cea_data.get("files", {}).get("GRID.csv")
+    carbon_col = _find_metric_col(grid_df, "GHG_kgCO2MJ", "CO2", "co2", "emission", "GHG") if grid_df is not None else None
+    if carbon_col:
+        try:
+            value = float(pd.to_numeric(grid_df[carbon_col], errors="coerce").dropna().iloc[0])
+            return value * 3.6 if "MJ" in carbon_col else value, f"GRID.csv column {carbon_col}"
+        except Exception:
+            pass
+    return 0.4, "fallback estimate 0.4 kgCO2/kWh"
+
+
+def compute_carbon_footprint_metrics(cea_data, selected_buildings=None, scale="District"):
+    files = cea_data.get("files", {})
+    pv_fname = next((k for k in files
+                     if k.startswith("PV_PV") and k.endswith("_total.csv")
+                     and "buildings" not in k), None)
+    if not pv_fname:
+        return "No PV total hourly file is available, so BIPV avoided carbon cannot be calculated reliably."
+
+    pv_df = files.get(pv_fname)
+    gen_col = _find_metric_col(pv_df, "E_PV_gen", "E_PV", "gen") if pv_df is not None else None
+    if pv_df is None or gen_col is None:
+        return f"{pv_fname} is available, but no PV generation column was found."
+
+    district_annual_pv = float(pd.to_numeric(pv_df[gen_col], errors="coerce").fillna(0).sum())
+    annual_pv = district_annual_pv
+    pv_scale = 1.0
+    pv_source = f"{pv_fname} district hourly total"
+
+    pv_b = files.get(pv_fname.replace("_total.csv", "_total_buildings.csv"))
+    if selected_buildings and pv_b is not None:
+        name_col = _find_metric_col(pv_b, "name", "building")
+        gen_b_col = _find_metric_col(pv_b, "E_PV_gen", "E_PV", "gen")
+        if name_col and gen_b_col:
+            selected_pv = pv_b[pv_b[name_col].isin(selected_buildings)]
+            selected_annual = float(pd.to_numeric(selected_pv[gen_b_col], errors="coerce").fillna(0).sum())
+            if selected_annual > 0:
+                annual_pv = selected_annual
+                pv_scale = annual_pv / district_annual_pv if district_annual_pv > 0 else 1.0
+                pv_source = f"{pv_fname.replace('_total.csv', '_total_buildings.csv')} filtered to selected building(s), with hourly profile scaled from {pv_fname}"
+
+    demand_hourly, demand_source = _sum_hourly_demand_series(files, selected_buildings)
+    if demand_hourly is None or len(demand_hourly) == 0:
+        return "No hourly electricity demand file was found for the selected scope, so carbon footprint cannot be calculated reliably."
+
+    pv_hourly = pd.to_numeric(pv_df[gen_col], errors="coerce").fillna(0).reset_index(drop=True) * pv_scale
+    n = min(len(pv_hourly), len(demand_hourly))
+    pv_hourly = pv_hourly.iloc[:n].reset_index(drop=True)
+    demand_hourly = demand_hourly.iloc[:n].reset_index(drop=True)
+    annual_pv = float(pv_hourly.sum())
+    annual_demand = float(demand_hourly.sum())
+    self_consumed = float(pd.concat([pv_hourly, demand_hourly], axis=1).min(axis=1).sum())
+
+    grid_carbon, grid_source = _grid_carbon_factor_for_metrics(cea_data)
+    baseline_tco2 = annual_demand * grid_carbon / 1000
+    avoided_tco2 = self_consumed * grid_carbon / 1000
+    net_tco2 = max(baseline_tco2 - avoided_tco2, 0)
+    abatement = avoided_tco2 / baseline_tco2 * 100 if baseline_tco2 > 0 else None
+
+    lines = [
+        f"Sources: {pv_source}; {demand_source}; grid carbon from {grid_source}.",
+        f"Scale: {scale}.",
+    ]
+    if selected_buildings:
+        lines.append(f"Selected buildings: {', '.join(selected_buildings)}.")
+        lines.append(f"Important scale rule: do not use district PV total {_format_number(district_annual_pv, ' kWh/year')} for this selected building/cluster result.")
+    lines.append(f"Annual electricity demand: {_format_number(annual_demand, ' kWh/year')}.")
+    lines.append(f"Annual PV generation: {_format_number(annual_pv, ' kWh/year')}.")
+    lines.append(f"Hourly PV used on site for carbon offset: {_format_number(self_consumed, ' kWh/year')}.")
+    lines.append(f"Grid carbon factor used: {_format_number(grid_carbon, ' kgCO2/kWh', 3)}.")
+    lines.append(f"Baseline electricity carbon footprint: {_format_number(baseline_tco2, ' tCO2/year', 1)}.")
+    lines.append(f"BIPV avoided carbon: {_format_number(avoided_tco2, ' tCO2/year', 1)}.")
+    lines.append(f"Net electricity carbon after BIPV: {_format_number(net_tco2, ' tCO2/year', 1)}.")
+    lines.append(f"Annual electricity-carbon reduction: {_format_number(abatement, '%', 1)}.")
+    lines.append("Interpretation boundary: this is an annual electricity-carbon footprint screen. Do not discuss panel manufacturing carbon or carbon payback years here.")
+    return "\n".join(lines)
+
+
+def _pv_scope_for_metrics(cea_data, selected_buildings=None):
+    files = cea_data.get("files", {})
+    pv_fname = next((k for k in files
+                     if k.startswith("PV_PV") and k.endswith("_total.csv")
+                     and "buildings" not in k), None)
+    if not pv_fname:
+        return None
+    pv_df = files.get(pv_fname)
+    gen_col = _find_metric_col(pv_df, "E_PV_gen", "E_PV", "gen") if pv_df is not None else None
+    if pv_df is None or not gen_col:
+        return None
+
+    district_annual = float(pd.to_numeric(pv_df[gen_col], errors="coerce").fillna(0).sum())
+    annual = district_annual
+    roof_area = facade_area = 0.0
+    source = f"{pv_fname} district total"
+    pv_b = files.get(pv_fname.replace("_total.csv", "_total_buildings.csv"))
+    if pv_b is not None:
+        name_col = _find_metric_col(pv_b, "name", "building")
+        gen_b_col = _find_metric_col(pv_b, "E_PV_gen", "E_PV", "gen")
+        df_use = pv_b.copy()
+        if selected_buildings and name_col:
+            df_use = df_use[df_use[name_col].isin(selected_buildings)]
+            source = f"{pv_fname.replace('_total.csv', '_total_buildings.csv')} filtered to selected building(s)"
+        if gen_b_col and not df_use.empty:
+            annual = float(pd.to_numeric(df_use[gen_b_col], errors="coerce").fillna(0).sum())
+        roof_col = _find_metric_col(df_use, "PV_roofs_top_m2")
+        if roof_col:
+            roof_area = float(pd.to_numeric(df_use[roof_col], errors="coerce").fillna(0).sum())
+        for direction in ["south", "east", "west", "north"]:
+            col = _find_metric_col(df_use, f"PV_walls_{direction}_m2")
+            if col:
+                facade_area += float(pd.to_numeric(df_use[col], errors="coerce").fillna(0).sum())
+    return {
+        "source": source,
+        "annual_kwh": annual,
+        "district_annual_kwh": district_annual,
+        "roof_area_m2": roof_area,
+        "facade_area_m2": facade_area,
+        "area_m2": roof_area + facade_area,
+    }
+
+
+def compute_carbon_payback_metrics(cea_data, selected_buildings=None, scale="District"):
+    scope = _pv_scope_for_metrics(cea_data, selected_buildings)
+    if not scope:
+        return "No PV result file is available, so carbon payback cannot be calculated reliably."
+    panel_df = cea_data.get("files", {}).get("PHOTOVOLTAIC_PANELS.csv")
+    embodied = 329.0
+    if panel_df is not None and not panel_df.empty:
+        emb_col = _find_metric_col(panel_df, "module_embodied", "embodied", "CO2")
+        if emb_col:
+            try:
+                embodied = float(pd.to_numeric(panel_df[emb_col], errors="coerce").dropna().iloc[0])
+            except Exception:
+                pass
+    grid_carbon, grid_source = _grid_carbon_factor_for_metrics(cea_data)
+    area = scope["area_m2"] if scope["area_m2"] > 0 else None
+    embodied_total = embodied * area if area else None
+    annual_avoided = scope["annual_kwh"] * grid_carbon
+    payback = embodied_total / annual_avoided if embodied_total and annual_avoided > 0 else None
+    lines = [
+        f"Sources: {scope['source']}; PHOTOVOLTAIC_PANELS.csv; grid carbon from {grid_source}.",
+        f"Scale: {scale}.",
+    ]
+    if selected_buildings:
+        lines.append(f"Selected buildings: {', '.join(selected_buildings)}.")
+        lines.append(f"Important scale rule: do not use district PV total {_format_number(scope['district_annual_kwh'], ' kWh/year')} for this selected building/cluster result.")
+    lines.append(f"Annual PV generation: {_format_number(scope['annual_kwh'], ' kWh/year')}.")
+    lines.append(f"CEA simulated active PV module area used for embodied carbon: {_format_number(area, ' m2', 1)}.")
+    lines.append(f"Panel embodied carbon used: {_format_number(embodied, ' kgCO2/m2', 1)}.")
+    lines.append(f"Total embodied panel carbon: {_format_number(embodied_total / 1000 if embodied_total else None, ' tCO2', 1)}.")
+    lines.append(f"Annual avoided carbon: {_format_number(annual_avoided / 1000, ' tCO2/year', 1)}.")
+    lines.append(f"Carbon payback period: {_format_number(payback, ' years', 1)}.")
+    return "\n".join(lines)
+
+
+def compute_economic_viability_metrics(cea_data, selected_buildings=None, scale="District"):
+    screen = compute_basic_economic_project_screen(cea_data, selected_buildings)
+    if not screen:
+        return "No PV/economic screen could be calculated from the extracted files."
+    prefix = [
+        f"Scale: {scale}.",
+        "Use this project-specific screen for Cost Analysis and Investment Payback. Do not use district totals for selected building/cluster results.",
+    ]
+    if selected_buildings:
+        prefix.append(f"Selected buildings: {', '.join(selected_buildings)}.")
+    return "\n".join(prefix + [screen])
+
+
 def compute_panel_tradeoff_metrics(cea_data, selected_buildings=None):
     files = cea_data.get("files", {})
     panel_db = files.get("PHOTOVOLTAIC_PANELS.csv")
@@ -1623,7 +2248,7 @@ def compute_panel_tradeoff_metrics(cea_data, selected_buildings=None):
             f"area {_format_number(row['area'], ' m2', 1)}; yield {_format_number(row['yield_m2'], ' kWh/m2/year', 1)}; "
             f"efficiency {_format_number(float(row['efficiency']) * 100 if row['efficiency'] is not None else None, '%', 1)}; "
             f"embodied carbon {_format_number(row['embodied'], ' kgCO2/m2', 1)}; "
-            f"roof cost {_format_number(row['roof_cost'], ' currency/m2', 1)}; facade cost {_format_number(row['facade_cost'], ' currency/m2', 1)}."
+            f"roof cost {_format_number(row['roof_cost'], ' €/m2', 1)}; facade cost {_format_number(row['facade_cost'], ' €/m2', 1)}."
         )
     return "\n".join(lines)
 
@@ -1768,7 +2393,7 @@ def compute_basic_economic_project_screen(cea_data, selected_buildings=None):
 
     lines = [
         f"Project-specific early BIPV economic screen ({currency}, from {template_name.replace('_', ' ').title()} baseline):",
-        f"- Simulated active PV area: roof {_format_number(roof_area, ' m2', 1)}; facade {_format_number(facade_area, ' m2', 1)}.",
+        f"- CEA simulated active PV module area: roof {_format_number(roof_area, ' m2', 1)}; facade {_format_number(facade_area, ' m2', 1)}.",
         f"- Annual PV generation from CEA: {_format_number(annual_pv_kwh, ' kWh/year')}.",
     ]
     if annual_demand_kwh is not None:
@@ -1878,6 +2503,19 @@ def compute_compact_metrics(skill_id, cea_data, selected_buildings=None, scale="
         return compute_massing_shading_metrics(cea_data, selected_buildings, scale)
     if skill_id == "site-potential--contextual-feasibility--infrastructure-readiness":
         return compute_infrastructure_readiness_metrics(cea_data, selected_buildings, scale)
+    if skill_id == "performance-estimation--energy-generation":
+        return compute_energy_generation_metrics(cea_data, selected_buildings, scale)
+    if skill_id == "performance-estimation--self-sufficiency":
+        return compute_self_sufficiency_metrics(cea_data, selected_buildings, scale)
+    if skill_id == "impact-and-viability--carbon-impact--carbon-footprint":
+        return compute_carbon_footprint_metrics(cea_data, selected_buildings, scale)
+    if skill_id == "impact-and-viability--carbon-impact--carbon-payback":
+        return compute_carbon_payback_metrics(cea_data, selected_buildings, scale)
+    if skill_id in (
+        "impact-and-viability--economic-viability--cost-analysis",
+        "impact-and-viability--economic-viability--investment-payback",
+    ):
+        return compute_economic_viability_metrics(cea_data, selected_buildings, scale)
     if skill_id in (
         "site-potential--contextual-feasibility--regulatory-constraints",
         "site-potential--contextual-feasibility--basic-economic-signal",
@@ -2863,6 +3501,14 @@ Regulatory Constraints is a single-output endpoint. Do not split the answer into
 - Include source website addresses for the public facts used.
 - Convert the regulatory context into a clear design consequence: what to change, reserve, avoid, document, or verify now.
 - If exact parcel-specific information is missing, add one short precision note naming who to contact and exactly what to ask. Do not let the whole answer become a caveat."""
+    elif skill_id == "performance-estimation--panel-type-tradeoff" and output_mode == "Explain the numbers":
+        mode_block = """OUTPUT MODE: Explain the numbers
+Return one compact markdown table first. Columns: panel type, technology, generation (kWh/year), area (m2), yield (kWh/m2/year), efficiency (%), embodied carbon (kgCO2/m2), roof cost (€/m2), facade cost (€/m2).
+After the table, add at most three short bullets:
+- which panel produces the most total generation,
+- which panel has the lowest embodied carbon,
+- what the main design trade-off is.
+Do not write one paragraph per panel. Do not use "currency/m2"; panel database costs are in euros, so label them as €/m2."""
     else:
         mode_block = mode_instructions.get(output_mode, f"Output mode: {output_mode}")
 
@@ -2876,6 +3522,14 @@ Regulatory Constraints is a single-output endpoint. Do not split the answer into
         )
 
     if compact_metrics:
+        area_lines = compute_building_surface_area_screen(cea_data, selected_buildings)
+        if area_lines:
+            compact_metrics = "\n".join([
+                compact_metrics,
+                "",
+                "Physical envelope area context:",
+                *area_lines,
+            ])
         public_context = ""
         if skill_id in (
             "site-potential--contextual-feasibility--infrastructure-readiness",
@@ -3171,6 +3825,10 @@ def build_tree():
 skills = load_skills_index()
 TREE = build_tree()
 
+def invalidate_analysis_cache():
+    st.session_state.analysis_ran = False
+    st.session_state.cached_system_prompt = None
+
 # ── Session state ──────────────────────────────────────────────────────────────
 for k, v in [("cea_data", None), ("chat_history", []),
               ("tree_scale", None), ("tree_goal", None), ("tree_sub", None),
@@ -3243,10 +3901,15 @@ else:
                         "Building", building_names,
                         index=building_names.index(st.session_state.selected_building)
                         if st.session_state.selected_building in building_names else 0,
-                        label_visibility="collapsed", key="building_selector"
+                        label_visibility="collapsed", key="building_selector",
+                        on_change=invalidate_analysis_cache
                     )
                     st.session_state.selected_building = chosen
                 elif st.session_state.tree_scale == "Cluster":
+                    st.session_state.selected_cluster = [
+                        b for b in st.session_state.selected_cluster
+                        if b in building_names
+                    ]
                     n = len(st.session_state.selected_cluster)
                     selected_label = "No buildings selected yet" if n == 0 else f"{n} building{'s' if n > 1 else ''} selected"
                     st.markdown(
@@ -3254,12 +3917,12 @@ else:
                         unsafe_allow_html=True
                     )
                     st.markdown("**Select buildings for cluster**")
-                    chosen = st.multiselect(
+                    st.multiselect(
                         "Buildings", building_names,
-                        default=st.session_state.selected_cluster,
-                        label_visibility="collapsed", key="cluster_selector"
+                        label_visibility="collapsed",
+                        key="selected_cluster",
+                        on_change=invalidate_analysis_cache
                     )
-                    st.session_state.selected_cluster = chosen
 
         # Step 2: Goal
         if st.session_state.tree_scale:
@@ -3341,7 +4004,7 @@ else:
                         "Infrastructure Readiness": "Is the necessary infrastructure in place to support solar integration?",
                         "Regulatory Constraints": "What legal constraints shape how solar systems can be integrated here?",
                         "Basic Economic Signal": "Is solar integration likely to be financially worthwhile here?",
-                        "Operational Carbon Footprint": "How much carbon will this building emit during operation?",
+                        "Carbon Footprint": "How much carbon does this building's electricity use create, and how much does BIPV reduce it?",
                         "Carbon Payback Period": "When does this design pay back its embodied carbon?",
                         "Cost Analysis": "Is BIPV-generated electricity cost-competitive with grid electricity?",
                         "Investment Payback": "How long until the system recovers its initial investment?",
@@ -3585,4 +4248,3 @@ else:
                     response = call_llm(system_prompt, recent_history)
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
                 st.rerun()
-
