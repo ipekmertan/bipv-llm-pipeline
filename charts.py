@@ -920,7 +920,7 @@ SKILL_CHART_MAP = {
     "site-potential--massing-and-shading-strategy":                         chart_massing_shading,
     # Energy generation
     "performance-estimation--energy-generation":                            chart_energy_generation,
-    "optimize-my-design--panel-type-tradeoff":                              chart_energy_generation,
+    "performance-estimation--panel-type-tradeoff":                          chart_energy_generation,
     "optimize-my-design--surface-prioritization":                           chart_energy_generation,
     "optimize-my-design--envelope-simplification":                          chart_energy_generation,
     "optimize-my-design--construction-and-integration":                     chart_energy_generation,
