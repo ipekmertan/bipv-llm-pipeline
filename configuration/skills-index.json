@@ -132,6 +132,17 @@
       "status": "complete"
     },
     {
+      "id": "optimize-my-design--panel-type-tradeoff",
+      "display_name": "Panel Type Trade-off",
+      "position_in_tree": [
+        "Performance Estimation",
+        "Panel Type Trade-off"
+      ],
+      "tooltip": "Which PV panel technology gives the best generation, cost, and carbon balance for this project?",
+      "data_source": "CEA + panel database",
+      "status": "complete"
+    },
+    {
       "id": "impact-and-viability--carbon-impact--operational-carbon-footprint",
       "display_name": "Operational Carbon Footprint",
       "position_in_tree": [
@@ -177,17 +188,6 @@
       ],
       "tooltip": "How long does it take for energy savings to recover the installation cost of this BIPV system?",
       "data_source": "CEA + calculation",
-      "status": "complete"
-    },
-    {
-      "id": "optimize-my-design--panel-type-tradeoff",
-      "display_name": "Panel Type Trade-off",
-      "position_in_tree": [
-        "Optimize My Design",
-        "Panel Type Trade-off"
-      ],
-      "tooltip": "How do different panel technologies compare across efficiency, cost, and embodied carbon for this project?",
-      "data_source": "CEA + LLM knowledge",
       "status": "complete"
     },
     {
