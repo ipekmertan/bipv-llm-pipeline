@@ -26,7 +26,7 @@ SKILL_SIMULATION_MAP = {
     "site-potential--envelope-suitability": ["solar_irradiation"],
     "site-potential--massing-and-shading-strategy": ["solar_irradiation"],
     "performance-estimation--energy-generation": ["pv"],
-    "optimize-my-design--panel-type-tradeoff": ["pv"],
+    "performance-estimation--panel-type-tradeoff": ["pv"],
     "optimize-my-design--surface-prioritization": ["pv"],
     "optimize-my-design--envelope-simplification": ["pv"],
     "optimize-my-design--construction-and-integration": ["pv"],
@@ -525,7 +525,7 @@ COMPACT_SKILL_TASKS = {
         "value, or resilience. Use prices, grid carbon, export compensation, cost ranges, and payback ranges "
         "only when supplied; otherwise give a useful concept-level framing and a short precision note."
     ),
-    "optimize-my-design--panel-type-tradeoff": (
+    "performance-estimation--panel-type-tradeoff": (
         "Interpret the simulated PV panel type comparison using actual generation, installed area, yield "
         "per square metre, and panel database values where available. Avoid assuming one technology is best "
         "unless the metrics show it."
@@ -1883,7 +1883,7 @@ def compute_compact_metrics(skill_id, cea_data, selected_buildings=None, scale="
         "site-potential--contextual-feasibility--basic-economic-signal",
     ):
         return compute_contextual_feasibility_metrics(skill_id, cea_data, selected_buildings, scale)
-    if skill_id == "optimize-my-design--panel-type-tradeoff":
+    if skill_id == "performance-estimation--panel-type-tradeoff":
         return compute_panel_tradeoff_metrics(cea_data, selected_buildings)
     return None
 
@@ -3585,3 +3585,4 @@ else:
                     response = call_llm(system_prompt, recent_history)
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
                 st.rerun()
+
