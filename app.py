@@ -27,11 +27,15 @@ SKILL_SIMULATION_MAP = {
     "site-potential--massing-and-shading-strategy": ["solar_irradiation"],
     "performance-estimation--energy-generation": ["pv"],
     "performance-estimation--panel-type-tradeoff": ["pv"],
+    "optimize-my-design--panel-type-tradeoff": ["pv"],
     "optimize-my-design--surface-prioritization": ["pv"],
     "optimize-my-design--envelope-simplification": ["pv"],
     "optimize-my-design--construction-and-integration": ["pv"],
+    "optimize-my-design--design-integration-recipe": ["solar_irradiation", "pv", "demand"],
+    "optimize-my-design--pv-coverage-scenario": ["pv", "demand"],
     "performance-estimation--self-sufficiency": ["pv", "demand"],
     "impact-and-viability--carbon-impact--carbon-footprint": ["pv", "demand"],
+    "impact-and-viability--carbon-impact--operational-carbon-footprint": ["pv", "demand"],
     "impact-and-viability--carbon-impact--carbon-payback": ["pv", "demand"],
     "impact-and-viability--economic-viability--cost-analysis": ["pv", "demand"],
     "impact-and-viability--economic-viability--investment-payback": ["pv", "demand"],
@@ -64,6 +68,27 @@ SKILLS_DIR = Path(__file__).parent / "skills"
 INFRASTRUCTURE_CONTEXT_PATH = Path(__file__).parent / "configuration" / "infrastructure_context.json"
 REGULATORY_CONTEXT_PATH = Path(__file__).parent / "configuration" / "regulatory_context.json"
 ECONOMIC_CONTEXT_PATH = Path(__file__).parent / "configuration" / "economic_context.json"
+
+SKILL_FOLDER_ALIASES = {
+    "impact-and-viability--carbon-impact--carbon-footprint": [
+        "impact-and-viability--carbon-impact--operational-carbon-footprint",
+    ],
+    "impact-and-viability--carbon-impact--operational-carbon-footprint": [
+        "impact-and-viability--carbon-impact--carbon-footprint",
+    ],
+    "performance-estimation--panel-type-tradeoff": [
+        "optimize-my-design--panel-type-tradeoff",
+    ],
+    "optimize-my-design--panel-type-tradeoff": [
+        "performance-estimation--panel-type-tradeoff",
+    ],
+}
+
+SINGLE_OUTPUT_SKILLS = {
+    "site-potential--contextual-feasibility--regulatory-constraints": "Regulatory brief",
+    "optimize-my-design--design-integration-recipe": "Design recipe",
+    "optimize-my-design--pv-coverage-scenario": "Coverage scenario",
+}
 
 @st.cache_data
 def load_skills_index():
@@ -98,8 +123,9 @@ def load_acacia_curves():
         return json.load(f)
 
 def load_skill_md(skill_id):
+    candidate_names = [skill_id] + SKILL_FOLDER_ALIASES.get(skill_id, [])
     for folder in SKILLS_DIR.iterdir():
-        if folder.name.strip() == skill_id:
+        if folder.name.strip() in candidate_names:
             md = folder / "SKILL.md"
             if md.exists(): return md.read_text()
     return ""
@@ -571,6 +597,11 @@ COMPACT_SKILL_TASKS = {
         "baseline grid-electricity carbon, hourly PV used on site, BIPV avoided carbon, net electricity carbon after "
         "BIPV, and annual reduction percentage. Do not discuss panel manufacturing carbon or carbon payback years."
     ),
+    "impact-and-viability--carbon-impact--operational-carbon-footprint": (
+        "Interpret the selected scope's annual electricity-carbon footprint and how much BIPV reduces it. Focus on "
+        "baseline grid-electricity carbon, hourly PV used on site, BIPV avoided carbon, net electricity carbon after "
+        "BIPV, and annual reduction percentage. Do not discuss panel manufacturing carbon or carbon payback years."
+    ),
     "impact-and-viability--carbon-impact--carbon-payback": (
         "Interpret the selected scope's carbon payback period: active PV area, embodied panel carbon, annual avoided "
         "carbon, and years until avoided operational carbon offsets panel manufacturing carbon. Respect the selected "
@@ -601,6 +632,21 @@ COMPACT_SKILL_TASKS = {
         "Interpret the simulated PV panel type comparison using actual generation, installed area, yield "
         "per square metre, and panel database values where available. Avoid assuming one technology is best "
         "unless the metrics show it."
+    ),
+    "optimize-my-design--panel-type-tradeoff": (
+        "Interpret the simulated PV panel type comparison using actual generation, installed area, yield "
+        "per square metre, and panel database values where available. Avoid assuming one technology is best "
+        "unless the metrics show it."
+    ),
+    "optimize-my-design--design-integration-recipe": (
+        "Create one consolidated BIPV design recipe from the analyses already run in this session and the current "
+        "project metrics. Prioritise design decisions: where PV goes, how much active area to use or keep PV-ready, "
+        "which surfaces to skip, what panel/envelope strategy to prefer, what storage/grid/equipment space to allow, "
+        "what client argument is strongest, and what the architect should do next. Do not repeat every prior analysis."
+    ),
+    "optimize-my-design--pv-coverage-scenario": (
+        "This is a local scenario tool, not an LLM interpretation. It lets the architect test how cost, carbon, "
+        "self-sufficiency, export, and active PV area change when only 0-100% of the recommended PV area is used."
     ),
 }
 
@@ -2422,6 +2468,178 @@ def compute_basic_economic_project_screen(cea_data, selected_buildings=None):
     return "\n".join(lines)
 
 
+def compute_pv_coverage_scenario_values(cea_data, selected_buildings=None, coverage_pct=100):
+    """Local what-if calculation for scaling the simulated active PV area."""
+    scope = _pv_scope_for_metrics(cea_data, selected_buildings)
+    if not scope:
+        return None
+
+    fraction = max(0, min(float(coverage_pct), 100)) / 100
+    base_pv = scope["annual_kwh"]
+    scenario_pv = base_pv * fraction
+    roof_area = scope["roof_area_m2"] * fraction
+    facade_area = scope["facade_area_m2"] * fraction
+    active_area = scope["area_m2"] * fraction
+
+    files = cea_data.get("files", {})
+    demand_hourly, demand_source = _sum_hourly_demand_series(files, selected_buildings)
+    annual_demand = float(demand_hourly.sum()) if demand_hourly is not None else None
+
+    self_consumed = export = self_sufficiency = annual_coverage = None
+    pv_fname = next((k for k in files if k.startswith("PV_PV") and k.endswith("_total.csv") and "buildings" not in k), None)
+    if pv_fname and demand_hourly is not None and len(demand_hourly) > 0:
+        pv_df = files.get(pv_fname)
+        gen_col = _find_metric_col(pv_df, "E_PV_gen", "E_PV", "gen") if pv_df is not None else None
+        if gen_col:
+            district_annual = float(pd.to_numeric(pv_df[gen_col], errors="coerce").fillna(0).sum())
+            scale = scenario_pv / district_annual if district_annual > 0 else 0
+            pv_hourly = pd.to_numeric(pv_df[gen_col], errors="coerce").fillna(0).reset_index(drop=True) * scale
+            n = min(len(pv_hourly), len(demand_hourly))
+            pv_hourly = pv_hourly.iloc[:n].reset_index(drop=True)
+            demand_use = demand_hourly.iloc[:n].reset_index(drop=True)
+            self_consumed = float(pd.concat([pv_hourly, demand_use], axis=1).min(axis=1).sum())
+            export = max(float(pv_hourly.sum()) - self_consumed, 0.0)
+            annual_demand = float(demand_use.sum())
+    elif annual_demand is not None:
+        self_consumed = min(scenario_pv, annual_demand)
+        export = max(scenario_pv - self_consumed, 0.0)
+
+    if annual_demand and annual_demand > 0:
+        annual_coverage = scenario_pv / annual_demand * 100
+        if self_consumed is not None:
+            self_sufficiency = self_consumed / annual_demand * 100
+
+    panel_df = files.get("PHOTOVOLTAIC_PANELS.csv")
+    roof_cost = facade_cost = None
+    embodied = None
+    if panel_df is not None and not panel_df.empty:
+        try:
+            roof_col = _find_metric_col(panel_df, "cost_roof", "roof")
+            facade_col = _find_metric_col(panel_df, "cost_facade", "facade")
+            emb_col = _find_metric_col(panel_df, "module_embodied", "embodied", "CO2")
+            roof_cost = float(pd.to_numeric(panel_df[roof_col], errors="coerce").dropna().iloc[0]) if roof_col else None
+            facade_cost = float(pd.to_numeric(panel_df[facade_col], errors="coerce").dropna().iloc[0]) if facade_col else None
+            embodied = float(pd.to_numeric(panel_df[emb_col], errors="coerce").dropna().iloc[0]) if emb_col else None
+        except Exception:
+            pass
+
+    investment = None
+    if roof_cost is not None and facade_cost is not None:
+        investment = roof_area * roof_cost + facade_area * facade_cost
+
+    grid_carbon, grid_source = _grid_carbon_factor_for_metrics(cea_data)
+    avoided_tco2 = self_consumed * grid_carbon / 1000 if self_consumed is not None else None
+    net_tco2 = max((annual_demand or 0) * grid_carbon / 1000 - (avoided_tco2 or 0), 0) if annual_demand is not None else None
+    embodied_tco2 = active_area * embodied / 1000 if embodied is not None else None
+
+    return {
+        "coverage_pct": coverage_pct,
+        "base_pv_kwh": base_pv,
+        "scenario_pv_kwh": scenario_pv,
+        "active_area_m2": active_area,
+        "roof_area_m2": roof_area,
+        "facade_area_m2": facade_area,
+        "annual_demand_kwh": annual_demand,
+        "self_consumed_kwh": self_consumed,
+        "export_kwh": export,
+        "self_sufficiency_pct": self_sufficiency,
+        "annual_coverage_pct": annual_coverage,
+        "investment": investment,
+        "avoided_tco2": avoided_tco2,
+        "net_tco2": net_tco2,
+        "embodied_tco2": embodied_tco2,
+        "grid_source": grid_source,
+        "demand_source": demand_source,
+    }
+
+
+def format_pv_coverage_scenario_for_recipe(values):
+    if not values:
+        return "No PV coverage scenario has been saved."
+    return (
+        f"Saved PV Coverage Scenario: {values['coverage_pct']:.0f}% of the CEA simulated active PV module area; "
+        f"active PV area {_format_number(values['active_area_m2'], ' m2', 1)}; "
+        f"annual PV generation {_format_number(values['scenario_pv_kwh'], ' kWh/year')}; "
+        f"self-sufficiency {_format_number(values['self_sufficiency_pct'], '%', 1)}; "
+        f"annual PV coverage before timing losses {_format_number(values['annual_coverage_pct'], '%', 1)}; "
+        f"export {_format_number(values['export_kwh'], ' kWh/year')}; "
+        f"estimated investment {_format_number(values['investment'], ' €', 0)}; "
+        f"avoided carbon {_format_number(values['avoided_tco2'], ' tCO2/year', 1)}; "
+        f"net electricity carbon {_format_number(values['net_tco2'], ' tCO2/year', 1)}."
+    )
+
+
+def render_pv_coverage_scenario_tool(cea_data, selected_buildings=None):
+    current = st.session_state.get("pv_coverage_pct", 50)
+    coverage = st.slider(
+        "How much of the recommended active PV area are you willing to cover?",
+        min_value=0,
+        max_value=100,
+        value=int(current),
+        step=5,
+        format="%d%%",
+        key="pv_coverage_pct"
+    )
+    values = compute_pv_coverage_scenario_values(cea_data, selected_buildings, coverage)
+    if not values:
+        st.warning("No PV result is available for this scenario.")
+        return
+
+    active_cells = round(coverage / 100 * 24)
+    cells = []
+    for i in range(24):
+        row = i // 6
+        col = i % 6
+        is_window = row in (1, 2) and col in (1, 4)
+        pv = (23 - i) < active_cells and not is_window
+        cls = "pv-cell" if pv else ("window-cell" if is_window else "wall-cell")
+        cells.append(f'<div class="{cls}"></div>')
+
+    html_block = f"""
+    <style>
+      .scenario-wrap {{ display:grid; grid-template-columns: 1fr 1fr; gap:22px; align-items:center; margin-top:12px; }}
+      .scenario-building {{ background:#f7f7f5; border:1px solid #ded9cf; border-radius:8px; padding:22px; min-height:310px; display:flex; align-items:center; justify-content:center; }}
+      .building-face {{ width:260px; height:230px; background:#b8bbc0; border:2px solid #8d9095; box-shadow:18px 16px 0 #9fa3a8; display:grid; grid-template-columns:repeat(6, 1fr); grid-template-rows:repeat(4, 1fr); gap:8px; padding:14px; transform:skewY(-4deg); }}
+      .wall-cell {{ background:#aeb2b7; border:1px solid rgba(0,0,0,.08); }}
+      .window-cell {{ background:#dfe8ee; border:1px solid #f5f8fa; }}
+      .pv-cell {{ background:#c8a96e; border:1px solid #9b7b3e; }}
+      .scenario-metrics {{ display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; }}
+      .metric-box {{ border:1px solid #e0dcd4; border-radius:8px; padding:12px; background:#fffdfa; }}
+      .metric-label {{ color:#777d8c; font-size:12px; margin-bottom:4px; }}
+      .metric-value {{ font-weight:600; color:#2d3142; font-size:17px; }}
+    </style>
+    <div class="scenario-wrap">
+      <div class="scenario-building"><div class="building-face">{''.join(cells)}</div></div>
+      <div class="scenario-metrics">
+        <div class="metric-box"><div class="metric-label">Active PV area</div><div class="metric-value">{_format_number(values['active_area_m2'], ' m2', 1)}</div></div>
+        <div class="metric-box"><div class="metric-label">PV generation</div><div class="metric-value">{_format_number(values['scenario_pv_kwh'], ' kWh/yr')}</div></div>
+        <div class="metric-box"><div class="metric-label">Self-sufficiency</div><div class="metric-value">{_format_number(values['self_sufficiency_pct'], '%', 1)}</div></div>
+        <div class="metric-box"><div class="metric-label">Export</div><div class="metric-value">{_format_number(values['export_kwh'], ' kWh/yr')}</div></div>
+        <div class="metric-box"><div class="metric-label">Estimated investment</div><div class="metric-value">{_format_number(values['investment'], ' €', 0)}</div></div>
+        <div class="metric-box"><div class="metric-label">Avoided carbon</div><div class="metric-value">{_format_number(values['avoided_tco2'], ' tCO2/yr', 1)}</div></div>
+      </div>
+    </div>
+    """
+    components.html(html_block, height=390)
+    st.caption("The slider scales the CEA simulated active PV module area. It does not assume the whole physical facade or roof is coverable.")
+
+    if st.button("Save this scenario for Design Integration Recipe", type="primary"):
+        st.session_state.pv_coverage_scenario = values
+        st.session_state.analysis_log = [
+            item for item in st.session_state.get("analysis_log", [])
+            if item.get("skill_id") != "optimize-my-design--pv-coverage-scenario"
+        ]
+        st.session_state.analysis_log.append({
+            "skill_id": "optimize-my-design--pv-coverage-scenario",
+            "skill_name": "PV Coverage Scenario",
+            "mode": "Coverage scenario",
+            "scale": st.session_state.tree_scale,
+            "selected_buildings": selected_buildings or [],
+            "response": format_pv_coverage_scenario_for_recipe(values),
+        })
+        st.success("Saved. The Design Integration Recipe will use this coverage scenario.")
+
+
 def compute_contextual_feasibility_metrics(skill_id, cea_data, selected_buildings=None, scale="District"):
     files = cea_data.get("files", {})
     city, country = _parse_weather_place(files.get("weather_header", ""))
@@ -2507,7 +2725,10 @@ def compute_compact_metrics(skill_id, cea_data, selected_buildings=None, scale="
         return compute_energy_generation_metrics(cea_data, selected_buildings, scale)
     if skill_id == "performance-estimation--self-sufficiency":
         return compute_self_sufficiency_metrics(cea_data, selected_buildings, scale)
-    if skill_id == "impact-and-viability--carbon-impact--carbon-footprint":
+    if skill_id in (
+        "impact-and-viability--carbon-impact--carbon-footprint",
+        "impact-and-viability--carbon-impact--operational-carbon-footprint",
+    ):
         return compute_carbon_footprint_metrics(cea_data, selected_buildings, scale)
     if skill_id == "impact-and-viability--carbon-impact--carbon-payback":
         return compute_carbon_payback_metrics(cea_data, selected_buildings, scale)
@@ -2521,9 +2742,86 @@ def compute_compact_metrics(skill_id, cea_data, selected_buildings=None, scale="
         "site-potential--contextual-feasibility--basic-economic-signal",
     ):
         return compute_contextual_feasibility_metrics(skill_id, cea_data, selected_buildings, scale)
-    if skill_id == "performance-estimation--panel-type-tradeoff":
+    if skill_id in (
+        "performance-estimation--panel-type-tradeoff",
+        "optimize-my-design--panel-type-tradeoff",
+    ):
         return compute_panel_tradeoff_metrics(cea_data, selected_buildings)
+    if skill_id == "optimize-my-design--design-integration-recipe":
+        return compute_design_integration_recipe_metrics(cea_data, selected_buildings, scale)
     return None
+
+
+def _shorten_for_recipe(text, limit=1200):
+    if not text:
+        return ""
+    compact = re.sub(r"\s+", " ", str(text)).strip()
+    return compact if len(compact) <= limit else compact[:limit].rstrip() + "..."
+
+
+def get_prior_analysis_context_for_recipe(current_skill_id=None):
+    log = st.session_state.get("analysis_log", [])
+    if not log:
+        return "No prior analysis outputs have been run in this project session yet."
+
+    rows = []
+    for item in log[-10:]:
+        if item.get("skill_id") == current_skill_id:
+            continue
+        label = item.get("skill_name") or item.get("skill_id") or "Analysis"
+        mode = item.get("mode") or "output"
+        scale = item.get("scale") or "scale not set"
+        buildings = item.get("selected_buildings") or []
+        building_text = f"; buildings: {', '.join(buildings)}" if buildings else ""
+        response = _shorten_for_recipe(item.get("response", ""), 1100)
+        rows.append(f"- {label} ({mode}, {scale}{building_text}): {response}")
+
+    if not rows:
+        return "No prior analysis outputs are available apart from the current recipe request."
+    return "\n".join(rows)
+
+
+def compute_design_integration_recipe_metrics(cea_data, selected_buildings=None, scale="District"):
+    """Compact, deterministic project facts for the final design recipe."""
+    sections = [
+        "Recipe evidence packet:",
+        f"Scale: {scale}.",
+    ]
+    if selected_buildings:
+        sections.append(f"Selected buildings: {', '.join(selected_buildings)}.")
+
+    metric_builders = [
+        ("Surface irradiation", compute_surface_irradiation_metrics),
+        ("Envelope suitability", compute_envelope_suitability_metrics),
+        ("Massing and shading", compute_massing_shading_metrics),
+        ("Infrastructure readiness", compute_infrastructure_readiness_metrics),
+        ("Energy generation", compute_energy_generation_metrics),
+        ("Self-sufficiency", compute_self_sufficiency_metrics),
+        ("Panel type trade-off", lambda data, buildings, _scale: compute_panel_tradeoff_metrics(data, buildings)),
+        ("Carbon footprint", compute_carbon_footprint_metrics),
+        ("Carbon payback", compute_carbon_payback_metrics),
+        ("Economic viability", compute_economic_viability_metrics),
+        ("Basic economic signal", lambda data, buildings, _scale: compute_basic_economic_project_screen(data, buildings)),
+    ]
+    for label, fn in metric_builders:
+        try:
+            value = fn(cea_data, selected_buildings, scale)
+        except Exception:
+            value = None
+        if value:
+            sections.append(f"\n{label} facts:\n{_shorten_for_recipe(value, 1600)}")
+
+    saved_scenario = st.session_state.get("pv_coverage_scenario")
+    if saved_scenario:
+        sections.append(f"\nSaved PV coverage scenario:\n{format_pv_coverage_scenario_for_recipe(saved_scenario)}")
+
+    prior = get_prior_analysis_context_for_recipe("optimize-my-design--design-integration-recipe")
+    sections.append(f"\nPrior interpretations already run in this project session:\n{prior}")
+    sections.append(
+        "\nRecipe rule: use prior interpretations as design intent/evidence. Use the computed facts above to fill gaps, "
+        "but do not claim an interpretation was previously run when it is only a computed fact."
+    )
+    return "\n".join(sections)
 
 
 def _clean_search_text(text, limit=700):
@@ -3501,7 +3799,21 @@ Regulatory Constraints is a single-output endpoint. Do not split the answer into
 - Include source website addresses for the public facts used.
 - Convert the regulatory context into a clear design consequence: what to change, reserve, avoid, document, or verify now.
 - If exact parcel-specific information is missing, add one short precision note naming who to contact and exactly what to ask. Do not let the whole answer become a caveat."""
-    elif skill_id == "performance-estimation--panel-type-tradeoff" and output_mode == "Explain the numbers":
+    elif skill_id == "optimize-my-design--design-integration-recipe":
+        mode_block = """OUTPUT MODE: Design recipe
+Design Integration Recipe is a single-output endpoint. Do not split the answer into Key takeaway, Explain the numbers, and Design implication.
+- Produce one coherent project guide, not a summary of separate analyses.
+- Start with the final recommended BIPV concept in plain professional language.
+- Then give the recipe in sections: PV placement, panel/envelope strategy, storage/grid/space allowance, client/carbon argument, and next design moves.
+- Use prior analyses already run in the session as the main interpretation memory.
+- Use computed project facts only to support the recipe or fill gaps. Clearly mark missing confidence gaps.
+- Do not repeat every number. Use the few numbers that change the design decision.
+- Distinguish physical roof/facade area from CEA simulated active PV module area.
+- End with concrete architectural actions, not generic advice."""
+    elif skill_id in (
+        "performance-estimation--panel-type-tradeoff",
+        "optimize-my-design--panel-type-tradeoff",
+    ) and output_mode == "Explain the numbers":
         mode_block = """OUTPUT MODE: Explain the numbers
 Return one compact markdown table first. Columns: panel type, technology, generation (kWh/year), area (m2), yield (kWh/m2/year), efficiency (%), embodied carbon (kgCO2/m2), roof cost (€/m2), facade cost (€/m2).
 After the table, add at most three short bullets:
@@ -3838,7 +4150,9 @@ for k, v in [("cea_data", None), ("chat_history", []),
               ("param_check_hidden", False),
               ("selected_building", None), ("selected_cluster", []),
               ("reasoning_open", False), ("reasoning_threshold", False),
-              ("cached_system_prompt", None), ("tree_subsubsub", None)]:   # FIX 2: cache slot
+              ("cached_system_prompt", None), ("tree_subsubsub", None),
+              ("analysis_log", []), ("pv_coverage_scenario", None),
+              ("pv_coverage_pct", 50)]:   # FIX 2: cache slot
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -3855,6 +4169,7 @@ if st.session_state.cea_data is None:
             st.error("No simulation files found.")
         else:
             st.session_state.cea_data = cea_data
+            st.session_state.analysis_log = []
             st.session_state.param_check_hidden = False
             if "weather_header" in cea_data["files"]:
                 st.session_state.threshold_result = get_threshold_check(
@@ -3970,10 +4285,10 @@ else:
                     "Carbon Impact": "How does this design affect lifecycle carbon emissions?",
                     "Economic Viability": "Does this design make financial sense over its lifetime?",
                     # Optimize My Design topics
-                    "Panel Type Trade-off": "Which panel type makes the most sense for this design?",
                     "Surface Prioritisation": "Where should I place the panels?",
                     "Envelope Simplification": "What small geometric changes would improve performance?",
                     "Construction & Integration": "How can this be integrated into the building?",
+                    "Design Integration Recipe": "What is the full BIPV design recipe based on the analyses already run?",
                 }
                 for topic, node in topics.items():
                     topic_tooltip = TOPIC_TOOLTIPS.get(topic, "")
@@ -4064,13 +4379,14 @@ else:
         )
         if skill_ready:
             st.markdown("")
-            if st.session_state.skill_id == "site-potential--contextual-feasibility--regulatory-constraints":
-                if st.session_state.tree_mode != "Regulatory brief":
-                    st.session_state.tree_mode = "Regulatory brief"
+            if st.session_state.skill_id in SINGLE_OUTPUT_SKILLS:
+                fixed_mode = SINGLE_OUTPUT_SKILLS[st.session_state.skill_id]
+                if st.session_state.tree_mode != fixed_mode:
+                    st.session_state.tree_mode = fixed_mode
                     st.session_state.analysis_ran = False
                     st.session_state.cached_system_prompt = None
                     st.rerun()
-                st.markdown("**Output** · *Regulatory brief*")
+                st.markdown(f"**Output** · *{fixed_mode}*")
             elif st.session_state.tree_mode:
                 st.markdown(f"**Output mode** · *{st.session_state.tree_mode}*")
             else:
@@ -4142,8 +4458,11 @@ else:
                 for k in ["cea_data","tree_scale","tree_goal","tree_sub","tree_subsub","tree_subsubsub",
                           "tree_mode","skill_id","skill_name","analysis_ran",
                           "threshold_result","param_check_hidden",
-                          "selected_building","selected_cluster","cached_system_prompt"]:
+                          "selected_building","selected_cluster","cached_system_prompt","analysis_log",
+                          "pv_coverage_scenario","pv_coverage_pct"]:
                     st.session_state[k] = None if k != "selected_cluster" else []
+                st.session_state.analysis_log = []
+                st.session_state.pv_coverage_pct = 50
                 st.session_state.chat_history = []
                 st.rerun()
 
@@ -4152,7 +4471,18 @@ else:
     with st.container():
         st.markdown("### Analysis")
 
-        if st.session_state.analysis_ran and st.session_state.skill_id and not st.session_state.chat_history:
+        if (st.session_state.analysis_ran
+                and st.session_state.skill_id == "optimize-my-design--pv-coverage-scenario"):
+            _scale = st.session_state.tree_scale
+            _selected = None
+            if _scale == "Building" and st.session_state.selected_building:
+                _selected = [st.session_state.selected_building]
+            elif _scale == "Cluster" and st.session_state.selected_cluster:
+                _selected = st.session_state.selected_cluster
+            st.markdown("**PV Coverage Scenario**")
+            render_pv_coverage_scenario_tool(st.session_state.cea_data, _selected)
+
+        elif st.session_state.analysis_ran and st.session_state.skill_id and not st.session_state.chat_history:
             scale = st.session_state.tree_scale
             selected_buildings = None
             if scale == "Building" and st.session_state.selected_building:
@@ -4185,9 +4515,18 @@ else:
             with st.spinner("Analysing…"):
                 response = call_llm(system_prompt, st.session_state.chat_history)
             st.session_state.chat_history.append({"role": "assistant", "content": response})
+            st.session_state.analysis_log.append({
+                "skill_id": st.session_state.skill_id,
+                "skill_name": st.session_state.skill_name,
+                "mode": st.session_state.tree_mode,
+                "scale": scale,
+                "selected_buildings": selected_buildings or [],
+                "response": response,
+            })
             st.rerun()
 
-        if not st.session_state.chat_history:
+        if (not st.session_state.chat_history
+                and st.session_state.skill_id != "optimize-my-design--pv-coverage-scenario"):
             st.markdown('<div class="info-box">← Complete the steps on the left to run an analysis.</div>',
                        unsafe_allow_html=True)
         elif st.session_state.skill_id and st.session_state.threshold_result:
