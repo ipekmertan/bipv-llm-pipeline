@@ -1,0 +1,1454 @@
+{
+  "generic": {
+    "match": {
+      "countries": [],
+      "keywords": []
+    },
+    "currency": "USD",
+    "currency_symbol": "$",
+    "electricity_price_kwh": null,
+    "electricity_price_note": "Electricity price not hardcoded for this region. Use web search result if available. Global residential average is approximately USD 0.17/kWh (Q1 2026, GlobalPetrolPrices).",
+    "electricity_price_trend": "rising globally — up ~10% year-on-year average",
+    "export_compensation_kwh": null,
+    "export_compensation_note": "Export/feed-in compensation not hardcoded for this region. Check local utility or national energy regulator.",
+    "bipv_cost_facade_m2_low": 300,
+    "bipv_cost_facade_m2_high": 700,
+    "bipv_cost_roof_m2_low": 150,
+    "bipv_cost_roof_m2_high": 400,
+    "bipv_cost_note": "Industry-average BIPV installed cost ranges in USD/m² (2024–2025). Facade BIPV typically 1.5–2x roof cost. Source: IEA PVPS, BloombergNEF.",
+    "payback_years_low": 8,
+    "payback_years_high": 20,
+    "payback_note": "Industry-average simple payback range. Highly location-dependent. Source: IEA PVPS Task 15 2024.",
+    "grid_carbon_kgco2_kwh": null,
+    "grid_carbon_note": "Grid carbon intensity not hardcoded for this region. World average is approximately 0.44 kgCO2/kWh (IEA 2024).",
+    "economic_signal": "marginal",
+    "primary_argument": "architectural",
+    "incentives": [],
+    "precision_note": "Contact the local utility or national energy agency for current electricity tariffs, export compensation rates, and connection requirements. Contact a local BIPV installer or cost consultant for installed cost/m2 and payback assumptions specific to this market.",
+    "electricity_by_use_type": {
+      "residential": {
+        "price": null,
+        "note": "Not hardcoded for this region."
+      },
+      "commercial": {
+        "price": null,
+        "note": "Commercial rates are typically 15–30% below residential in most markets."
+      },
+      "industrial": {
+        "price": null,
+        "note": "Industrial rates are typically 30–50% below residential in most markets."
+      },
+      "public": {
+        "price": null,
+        "note": "Public institution rates vary by country — often commercial tariff."
+      },
+      "mixed": {
+        "price": null,
+        "note": "Use dominant use type."
+      }
+    },
+    "use_type_tariff_note": "Use type affects tariff category significantly. Commercial users typically pay 15–30% less than residential; industrial 30–50% less. China and India are notable exceptions where commercial rates can exceed residential. Always check local utility tariff schedule."
+  },
+  "switzerland": {
+    "match": {
+      "countries": [
+        "Switzerland",
+        "CHE",
+        "CH"
+      ],
+      "keywords": [
+        "zurich",
+        "zürich",
+        "zug",
+        "geneva",
+        "genf",
+        "basel",
+        "lausanne",
+        "bern",
+        "switzerland",
+        "schweiz",
+        "suisse",
+        "svizzera"
+      ]
+    },
+    "currency": "CHF",
+    "currency_symbol": "CHF",
+    "electricity_price_kwh": 0.29,
+    "electricity_price_range_low": 0.22,
+    "electricity_price_range_high": 0.38,
+    "electricity_price_note": "Swiss residential electricity: national average CHF 0.277/kWh for 2026 (ElCom Sept 2025), down 4% from 2025 (CHF 0.29/kWh). Prices vary sharply by municipality — CHF 0.095–0.46/kWh range nationally. Commercial/business rate approximately CHF 0.237/kWh (GlobalPetrolPrices Sept 2025). Source: ElCom 2025 tariff database; swissinfo.ch Sept 2025.",
+    "electricity_price_trend": "declining — down 4% in 2026 after 10% drop in 2025, following 2022–2024 energy crisis spikes. Still ~35% above pre-2022 levels.",
+    "export_compensation_kwh": 0.1,
+    "export_compensation_range_low": 0.059,
+    "export_compensation_range_high": 0.17,
+    "export_compensation_note": "Swiss Rückliefervergütung (grid purchase price) varies by utility: CHF 0.059–0.17/kWh including HKN certificates (Jan 2025). From 2026 compensation tracks exchange Richtstrompreis with a minimum floor for small systems. Self-consumption is always significantly more valuable than export. Source: photovoltaikmeister.ch Jan 2025; CKW Dec 2025.",
+    "bipv_cost_facade_m2_low": 400,
+    "bipv_cost_facade_m2_high": 700,
+    "bipv_cost_roof_m2_low": 250,
+    "bipv_cost_roof_m2_high": 450,
+    "bipv_cost_note": "Swiss BIPV installed cost in CHF/m² (2024–2025). Standard roof-integrated 10 kWp system: ~CHF 28,000 total = ~CHF 280/m2 panel area (CKW Herbst 2025). Facade BIPV: CHF 400–700/m2 including mounting, inverter, and connection. Source: CKW photovoltaik-kosten Dec 2025; SunStyle Oct 2025; Swissolar.",
+    "payback_years_low": 10,
+    "payback_years_high": 18,
+    "payback_note": "Simple payback for Swiss BIPV (2024–2025). Roof with good self-consumption: 10–14 years. Facade: 14–18 years. SunStyle example: 10 kWp saving CHF 2,700–3,000/year. KLEIV subsidy reduces payback by 1–2 years. Source: SunStyle Oct 2025; solar-ratgeber.ch Dec 2025.",
+    "grid_carbon_kgco2_kwh": 0.035,
+    "grid_carbon_note": "Swiss grid carbon intensity ~0.03–0.04 kgCO2/kWh (KBOB/ecoinvent 2024), among the lowest globally — dominated by hydro (~57%) and nuclear (~33%). The carbon argument for BIPV is weak in Switzerland. The economic argument (electricity savings) is the primary case. Source: KBOB 2024; ecoinvent v3.10.",
+    "economic_signal": "moderate-strong",
+    "primary_argument": "economic",
+    "incentives": [
+      "KLEIV Einmalvergütung (one-time subsidy ≤100 kWp): CHF 360/kWp for systems ≤30 kWp; CHF 300/kWp for 30–100 kWp (Pronovo rates from 1 April 2025). Example: 10 kWp = CHF 3,600. BIPV steep-angle bonus: additional CHF 200–400/kWp for inclination >75° (doubled from 2025). Apply via pronovo.ch after commissioning.",
+      "GREIV (large systems ≥100 kWp): CHF 250–330/kWp for integrated/attached systems. Facade BIPV classified as gebäudeintegriert now eligible for higher rate from April 2025.",
+      "Cantonal and municipal energy subsidies: varies by canton. Check dasgebaeudeprogramm.ch and energiefranken.ch for current programmes.",
+      "VAT: 0% on solar panels and modules; 8.1% on installation labour.",
+      "Federal Energy Strategy 2050 and EnG Mantelerlass 2025 expand mandatory solar for large new buildings."
+    ],
+    "precision_note": "For this project: (1) Check electricity tariff and Rückliefervergütung for the building type at elcom.admin.ch or directly with local utility (EKZ for Zurich/Zug). (2) Calculate current KLEIV subsidy via pronovo.ch/tarifrechner — include steep-angle bonus if facade inclination >75°. (3) Get installed BIPV cost/m2 quote from Swissolar member (swissolar.ch). These three inputs are sufficient to run a reliable payback calculation.",
+    "electricity_by_use_type": {
+      "residential": {
+        "price": 0.29,
+        "range_low": 0.22,
+        "range_high": 0.38,
+        "note": "Swiss residential (H4 profile, ElCom 2025). National average CHF 0.277/kWh in 2026."
+      },
+      "commercial": {
+        "price": 0.24,
+        "range_low": 0.18,
+        "range_high": 0.3,
+        "note": "Swiss commercial/office (C3 profile, ElCom 2025). Typically CHF 0.18–0.30/kWh depending on consumption volume and utility."
+      },
+      "industrial": {
+        "price": 0.17,
+        "range_low": 0.12,
+        "range_high": 0.22,
+        "note": "Swiss industrial/large-commercial (I4 profile, ElCom 2025). Lower due to volume discounts; large consumers negotiate directly."
+      },
+      "public": {
+        "price": 0.24,
+        "range_low": 0.18,
+        "range_high": 0.3,
+        "note": "Swiss public buildings (schools, hospitals, universities) typically on commercial/C3 tariff. Check with cantonal utility."
+      },
+      "mixed": {
+        "price": 0.25,
+        "range_low": 0.18,
+        "range_high": 0.32,
+        "note": "Mixed-use building: blend of residential and commercial rates. Use dominant use type for primary calculation."
+      }
+    },
+    "use_type_tariff_note": "Swiss electricity tariffs differ significantly by consumer category. Commercial and industrial users pay lower rates than households due to higher consumption volumes and different network fee structures. Source: ElCom C3/H4 profiles 2025."
+  },
+  "europe_generic": {
+    "match": {
+      "countries": [
+        "Germany",
+        "France",
+        "Italy",
+        "Spain",
+        "Netherlands",
+        "Austria",
+        "Belgium",
+        "Denmark",
+        "Sweden",
+        "Norway",
+        "Finland"
+      ],
+      "keywords": [
+        "europe",
+        "eu",
+        "germany",
+        "france",
+        "italy",
+        "spain",
+        "netherlands",
+        "austria",
+        "belgium",
+        "denmark",
+        "sweden",
+        "norway",
+        "finland",
+        "deutschland",
+        "münchen",
+        "berlin",
+        "paris",
+        "madrid",
+        "amsterdam",
+        "vienna",
+        "wien",
+        "oslo",
+        "stockholm",
+        "helsinki",
+        "copenhagen"
+      ]
+    },
+    "currency": "EUR",
+    "currency_symbol": "€",
+    "electricity_price_kwh": 0.29,
+    "electricity_price_range_low": 0.17,
+    "electricity_price_range_high": 0.43,
+    "electricity_price_note": "EU-27 average residential electricity: approximately €0.287/kWh (Eurostat H1 2025). Wide range: Germany highest at €0.37–0.40/kWh (BDEW 2025); France €0.22–0.26/kWh (CRE 2024); Nordics €0.17–0.25/kWh. Source: Eurostat electricity price statistics H1 2025.",
+    "electricity_price_trend": "stabilising after 2022–2023 energy crisis peak; declining in many markets 2024–2025",
+    "export_compensation_kwh": 0.08,
+    "export_compensation_range_low": 0.04,
+    "export_compensation_range_high": 0.15,
+    "export_compensation_note": "European feed-in/export varies by country. Germany EEG 2024: €0.075–0.089/kWh for ≤10 kWp. France S21: ~€0.06/kWh. Netherlands: saldering (net metering) being phased out 2025–2027. Source: national energy regulators 2024–2025.",
+    "bipv_cost_facade_m2_low": 300,
+    "bipv_cost_facade_m2_high": 650,
+    "bipv_cost_roof_m2_low": 150,
+    "bipv_cost_roof_m2_high": 400,
+    "bipv_cost_note": "European BIPV installed cost in EUR/m2 (2024–2025). Germany/Austria: €150–350/m2 roof; €300–600/m2 facade. Source: Fraunhofer ISE Photovoltaics Report 2024; IEA PVPS.",
+    "payback_years_low": 8,
+    "payback_years_high": 17,
+    "payback_note": "Simple payback for European BIPV (2024–2025). Shorter in high-price markets (Germany: 8–13 years). Source: IEA PVPS Task 15 2024; Fraunhofer ISE.",
+    "grid_carbon_kgco2_kwh": 0.25,
+    "grid_carbon_note": "EU-27 grid carbon intensity ~0.22–0.28 kgCO2/kWh (Ember 2024), declining. Germany ~0.38; France ~0.06; Nordics ~0.05–0.15. Use country-specific value when known. Source: Ember European Electricity Review 2024.",
+    "economic_signal": "strong",
+    "primary_argument": "economic",
+    "incentives": [
+      "EU Solar Energy Strategy and Renovation Wave — mandatory rooftop solar expanding on new non-residential buildings.",
+      "National feed-in tariffs and net metering — check res-legal.eu for country-specific rules.",
+      "0% VAT on solar panels in Germany, Poland, and several other EU states since 2023.",
+      "Country grants: German KfW (276/270), French MaPrimeRénov', Italian Superbonus successors, Spanish PERTE Energía Limpia."
+    ],
+    "precision_note": "Check national feed-in tariff and net metering at res-legal.eu or national regulator. Contact local DSO for grid connection and export approval. Get BIPV cost quote from national solar association member (BSW-Solar Germany, SER France, UNEF Spain).",
+    "electricity_by_use_type": {
+      "residential": {
+        "price": 0.29,
+        "range_low": 0.17,
+        "range_high": 0.43,
+        "note": "EU-27 average residential (Eurostat H1 2025)."
+      },
+      "commercial": {
+        "price": 0.22,
+        "range_low": 0.13,
+        "range_high": 0.35,
+        "note": "EU-27 average non-household/commercial. Typically 20–35% below residential. Source: Eurostat non-household electricity prices H1 2025."
+      },
+      "industrial": {
+        "price": 0.15,
+        "range_low": 0.09,
+        "range_high": 0.24,
+        "note": "EU industrial electricity: varies widely by country and consumption band. Germany industrial ~€0.238/kWh (Bundesnetzagentur 2024); lower-cost EU countries significantly cheaper."
+      },
+      "public": {
+        "price": 0.22,
+        "range_low": 0.13,
+        "range_high": 0.32,
+        "note": "European public buildings typically on commercial/non-household tariff."
+      },
+      "mixed": {
+        "price": 0.24,
+        "range_low": 0.14,
+        "range_high": 0.36,
+        "note": "Mixed-use: use dominant use type for primary calculation."
+      }
+    },
+    "use_type_tariff_note": "European commercial and industrial electricity is typically 20–40% cheaper than residential due to higher consumption volumes and different network fee structures. Source: Eurostat electricity price statistics 2025."
+  },
+  "united_kingdom": {
+    "match": {
+      "countries": [
+        "United Kingdom",
+        "UK",
+        "GBR",
+        "GB",
+        "Great Britain",
+        "England",
+        "Scotland",
+        "Wales",
+        "Northern Ireland"
+      ],
+      "keywords": [
+        "uk",
+        "united kingdom",
+        "great britain",
+        "england",
+        "scotland",
+        "wales",
+        "northern ireland",
+        "london",
+        "manchester",
+        "birmingham",
+        "edinburgh",
+        "glasgow",
+        "bristol",
+        "leeds",
+        "sheffield",
+        "liverpool"
+      ]
+    },
+    "currency": "GBP",
+    "currency_symbol": "£",
+    "electricity_price_kwh": 0.245,
+    "electricity_price_range_low": 0.22,
+    "electricity_price_range_high": 0.28,
+    "electricity_price_note": "UK residential electricity: Ofgem price cap Q1 2025 approximately 24.5p/kWh unit rate for typical household. Commercial rates typically lower and unregulated. Source: Ofgem price cap Q1 2025.",
+    "electricity_price_trend": "declining from 2022–2023 peak; Ofgem cap gradually reducing. Expected to remain above pre-2022 levels.",
+    "export_compensation_kwh": 0.15,
+    "export_compensation_range_low": 0.12,
+    "export_compensation_range_high": 0.2,
+    "export_compensation_note": "UK Smart Export Guarantee (SEG): mandatory for licensed suppliers with 150,000+ customers. Rate varies by supplier: typically 12–20p/kWh. Source: Ofgem SEG register 2024–2025.",
+    "bipv_cost_facade_m2_low": 350,
+    "bipv_cost_facade_m2_high": 700,
+    "bipv_cost_roof_m2_low": 180,
+    "bipv_cost_roof_m2_high": 420,
+    "bipv_cost_note": "UK BIPV installed cost in GBP/m2 (2024–2025). Source: MCS certified installer data 2024; BEIS.",
+    "payback_years_low": 10,
+    "payback_years_high": 17,
+    "payback_note": "Simple payback for UK BIPV (2024–2025). Source: Energy Saving Trust 2024; CIBSE solar guide.",
+    "grid_carbon_kgco2_kwh": 0.21,
+    "grid_carbon_note": "UK grid carbon intensity ~0.18–0.24 kgCO2/kWh (2024), declining as coal exits and offshore wind expands. Source: National Grid ESO Carbon Intensity API 2024; DESNZ.",
+    "economic_signal": "moderate-strong",
+    "primary_argument": "economic",
+    "incentives": [
+      "Smart Export Guarantee (SEG): mandatory export payment — compare rates at ofgem.gov.uk.",
+      "0% VAT on residential solar installations (since April 2022).",
+      "Future Homes Standard (2025+): new homes must be net-zero ready.",
+      "Great British Energy initiative (2025): government support for building-scale solar."
+    ],
+    "precision_note": "Check current Ofgem SEG rates at ofgem.gov.uk. Contact local DNO for connection enquiry (Energy Networks Association postcode checker). Get quote from MCS-certified BIPV installer: mcscertified.com.",
+    "electricity_by_use_type": {
+      "residential": {
+        "price": 0.245,
+        "range_low": 0.22,
+        "range_high": 0.28,
+        "note": "UK residential: Ofgem price cap Q1 2025 ~24.5p/kWh unit rate."
+      },
+      "commercial": {
+        "price": 0.18,
+        "range_low": 0.14,
+        "range_high": 0.25,
+        "note": "UK commercial electricity: unregulated, varies by supplier and contract. Typically 14–25p/kWh. Source: BEIS commercial energy prices 2024."
+      },
+      "industrial": {
+        "price": 0.14,
+        "range_low": 0.1,
+        "range_high": 0.2,
+        "note": "UK industrial electricity: typically 10–20p/kWh depending on volume and contract. Source: BEIS industrial energy prices 2024."
+      },
+      "public": {
+        "price": 0.18,
+        "range_low": 0.14,
+        "range_high": 0.23,
+        "note": "UK public sector (NHS, schools, councils) typically on commercial contracts via frameworks (e.g. Crown Commercial Service)."
+      },
+      "mixed": {
+        "price": 0.2,
+        "range_low": 0.15,
+        "range_high": 0.26,
+        "note": "Mixed-use: use dominant use type for primary calculation."
+      }
+    },
+    "use_type_tariff_note": "UK commercial and industrial electricity is unregulated and typically 25–45% cheaper than residential (Ofgem-capped) rates. Source: BEIS Energy Prices 2024."
+  },
+  "united_states": {
+    "match": {
+      "countries": [
+        "United States",
+        "USA",
+        "US",
+        "United States of America"
+      ],
+      "keywords": [
+        "united states",
+        "usa",
+        "us",
+        "california",
+        "new york",
+        "texas",
+        "florida",
+        "illinois",
+        "washington",
+        "boston",
+        "chicago",
+        "los angeles",
+        "san francisco",
+        "seattle",
+        "denver",
+        "miami",
+        "houston",
+        "phoenix"
+      ]
+    },
+    "currency": "USD",
+    "currency_symbol": "$",
+    "electricity_price_kwh": 0.16,
+    "electricity_price_range_low": 0.1,
+    "electricity_price_range_high": 0.32,
+    "electricity_price_note": "US commercial electricity: national average ~$0.127/kWh; residential ~$0.162/kWh (EIA 2024). Wide state variation: CA/Northeast ~$0.25–0.32/kWh; Southeast/Midwest ~$0.10–0.13/kWh. Source: EIA Electric Power Monthly 2024.",
+    "electricity_price_trend": "rising moderately; high-price states (CA, NY, MA, CT) seeing fastest growth",
+    "export_compensation_kwh": 0.08,
+    "export_compensation_range_low": 0.03,
+    "export_compensation_range_high": 0.2,
+    "export_compensation_note": "US net metering varies enormously by state and utility. California NEM 3.0 (2023): ~$0.03–0.08/kWh. Full retail net metering still in many states. Source: DSIRE (dsireusa.org) 2024.",
+    "bipv_cost_facade_m2_low": 250,
+    "bipv_cost_facade_m2_high": 650,
+    "bipv_cost_roof_m2_low": 150,
+    "bipv_cost_roof_m2_high": 380,
+    "bipv_cost_note": "US BIPV installed cost in USD/m2 (2024). Source: NREL Q3 2024 Solar Industry Update; Lawrence Berkeley National Laboratory Tracking the Sun.",
+    "payback_years_low": 7,
+    "payback_years_high": 16,
+    "payback_note": "Simple payback for US BIPV (2024). High-price states: 7–11 years. 30% federal ITC significantly shortens payback. Source: NREL; DOE SunShot.",
+    "grid_carbon_kgco2_kwh": 0.39,
+    "grid_carbon_note": "US average grid carbon intensity ~0.37–0.42 kgCO2/kWh (2024). Regional variation: Western US ~0.27; Southeast ~0.44; Texas ~0.37. Source: EPA eGrid 2024; IEA Emissions Factors.",
+    "economic_signal": "moderate-strong",
+    "primary_argument": "economic",
+    "incentives": [
+      "Federal ITC: 30% of installed cost under IRA 2022. Bonus credits up to +30% for domestic content, energy communities, low-income — total up to 60%.",
+      "Accelerated depreciation (MACRS 5-year): significant after-tax benefit for commercial systems.",
+      "State incentives and net metering — check dsireusa.org for project-specific rules.",
+      "California mandatory solar on new homes since 2020; increasing commercial mandates."
+    ],
+    "precision_note": "Check state-specific net metering, rebates, and incentives at dsireusa.org. Contact local utility for interconnection requirements and queue timeline. Get quote from NABCEP-certified installer. Calculate ITC and depreciation benefit with tax advisor for commercial projects.",
+    "electricity_by_use_type": {
+      "residential": {
+        "price": 0.162,
+        "range_low": 0.1,
+        "range_high": 0.32,
+        "note": "US residential average ~/bin/sh.162/kWh (EIA 2024). Wide state variation."
+      },
+      "commercial": {
+        "price": 0.127,
+        "range_low": 0.08,
+        "range_high": 0.25,
+        "note": "US commercial average ~/bin/sh.127/kWh (EIA 2024). Source: EIA Electric Power Monthly."
+      },
+      "industrial": {
+        "price": 0.085,
+        "range_low": 0.05,
+        "range_high": 0.15,
+        "note": "US industrial average ~/bin/sh.085/kWh (EIA 2024). Source: EIA Electric Power Monthly."
+      },
+      "public": {
+        "price": 0.12,
+        "range_low": 0.08,
+        "range_high": 0.22,
+        "note": "US public buildings (schools, hospitals, government) typically on commercial tariff."
+      },
+      "mixed": {
+        "price": 0.135,
+        "range_low": 0.09,
+        "range_high": 0.26,
+        "note": "Mixed-use: use dominant use type for primary calculation."
+      }
+    },
+    "use_type_tariff_note": "US commercial electricity is ~22% cheaper than residential on average; industrial ~47% cheaper. These differences are significant for BIPV payback calculations. Source: EIA Electric Power Monthly 2024."
+  },
+  "canada": {
+    "match": {
+      "countries": [
+        "Canada",
+        "CAN"
+      ],
+      "keywords": [
+        "canada",
+        "ontario",
+        "quebec",
+        "british columbia",
+        "alberta",
+        "toronto",
+        "vancouver",
+        "montreal",
+        "calgary",
+        "ottawa",
+        "edmonton",
+        "winnipeg"
+      ]
+    },
+    "currency": "CAD",
+    "currency_symbol": "CAD",
+    "electricity_price_kwh": 0.14,
+    "electricity_price_range_low": 0.07,
+    "electricity_price_range_high": 0.22,
+    "electricity_price_note": "Canadian residential electricity varies strongly by province (2024–2025). Quebec: ~CAD 0.07–0.09/kWh (cheap hydro). Ontario: ~CAD 0.12–0.16/kWh. BC: ~CAD 0.13/kWh. Alberta: ~CAD 0.16–0.22/kWh (deregulated). Source: provincial utility tariffs 2024.",
+    "electricity_price_trend": "rising in most provinces due to grid modernisation and electrification",
+    "export_compensation_kwh": 0.07,
+    "export_compensation_range_low": 0.04,
+    "export_compensation_range_high": 0.15,
+    "export_compensation_note": "Canadian net metering varies by province. Ontario: net metering at retail rate. BC: net metering at avoided cost. Quebec: ~CAD 0.04/kWh (very low — low hydro baseline). Source: provincial utility programs 2024.",
+    "bipv_cost_facade_m2_low": 280,
+    "bipv_cost_facade_m2_high": 650,
+    "bipv_cost_roof_m2_low": 170,
+    "bipv_cost_roof_m2_high": 420,
+    "bipv_cost_note": "Canadian BIPV installed cost in CAD/m2 (2024). Source: CanSIA 2024; NREL benchmarks adjusted for Canadian market.",
+    "payback_years_low": 10,
+    "payback_years_high": 22,
+    "payback_note": "Simple payback for Canadian BIPV (2024). Longer in low-cost provinces (Quebec: 18–25 years). Shorter in high-cost provinces (Alberta: 10–14 years). Source: NRCan 2024.",
+    "grid_carbon_kgco2_kwh": 0.13,
+    "grid_carbon_note": "Canadian national grid carbon ~0.12–0.15 kgCO2/kWh (2024), low due to dominant hydro (~60%) and nuclear (~15%). Alberta significantly higher (~0.55 kgCO2/kWh). Carbon argument weak at national level but strong in Alberta. Source: ECCC National Inventory Report 2024.",
+    "economic_signal": "marginal",
+    "primary_argument": "regulatory",
+    "incentives": [
+      "Canada Greener Homes Loan and Grant: federal program for residential solar — check NRCan for current status.",
+      "Provincial programs: Ontario Greener Homes; BC CleanBC Better Homes; Alberta municipal programs.",
+      "Federal Clean Economy ITC: proposed 30% for clean energy equipment — check CRA for current status.",
+      "Canada net-zero by 2050 target and evolving building codes."
+    ],
+    "precision_note": "Check provincial utility net metering tariff and connection requirements with local utility. Check federal and provincial grants at nrcan.gc.ca. Get quote from CanSIA member installer.",
+    "electricity_by_use_type": {
+      "residential": {
+        "price": 0.14,
+        "range_low": 0.07,
+        "range_high": 0.22,
+        "note": "Canadian residential: CAD 0.07–0.22/kWh by province (NRCan 2024)."
+      },
+      "commercial": {
+        "price": 0.12,
+        "range_low": 0.07,
+        "range_high": 0.18,
+        "note": "Canadian commercial: CAD 0.07–0.18/kWh by province. Demand charges add to effective cost. Source: NRCan 2024."
+      },
+      "industrial": {
+        "price": 0.09,
+        "range_low": 0.05,
+        "range_high": 0.15,
+        "note": "Canadian industrial: CAD 0.05–0.15/kWh. Source: NRCan 2024."
+      },
+      "public": {
+        "price": 0.12,
+        "range_low": 0.07,
+        "range_high": 0.17,
+        "note": "Canadian public buildings typically on commercial/general service tariff."
+      },
+      "mixed": {
+        "price": 0.12,
+        "range_low": 0.07,
+        "range_high": 0.18,
+        "note": "Mixed-use: use dominant use type for primary calculation."
+      }
+    },
+    "use_type_tariff_note": "Canadian electricity prices vary more by province than by use type for smaller consumers. Large industrial users negotiate directly. Source: NRCan electricity prices report 2024."
+  },
+  "north_america_generic": {
+    "match": {
+      "countries": [
+        "Mexico"
+      ],
+      "keywords": [
+        "north america",
+        "mexico",
+        "central america",
+        "mexico city",
+        "guadalajara",
+        "monterrey"
+      ]
+    },
+    "currency": "MXN",
+    "currency_symbol": "MXN",
+    "electricity_price_kwh": 1.2,
+    "electricity_price_range_low": 0.8,
+    "electricity_price_range_high": 4.5,
+    "electricity_price_note": "Mexican residential electricity: CFE subsidised tariffs MXN 0.80–4.50/kWh. DAC (high consumption) tariff ~MXN 4.50/kWh makes BIPV strongly economic for those consumers. Source: CFE tariff schedule 2024.",
+    "electricity_price_trend": "rising as CFE subsidy reform continues; DAC tariff increases most relevant for BIPV economics",
+    "export_compensation_kwh": null,
+    "export_compensation_note": "Mexico Medición Neta (net metering): excess credited at CFE generation cost rate, not retail. Surplus resets annually. Source: CRE net metering regulation 2024.",
+    "bipv_cost_facade_m2_low": 3000,
+    "bipv_cost_facade_m2_high": 8000,
+    "bipv_cost_roof_m2_low": 2000,
+    "bipv_cost_roof_m2_high": 5000,
+    "bipv_cost_note": "Mexican BIPV installed cost in MXN/m2 (2024). Imported components dominate costs. Source: ANES (Asociación Nacional de Energía Solar) 2024.",
+    "payback_years_low": 6,
+    "payback_years_high": 15,
+    "payback_note": "Simple payback for Mexican BIPV (2024). Shorter for DAC consumers in high-irradiation regions. Source: ANES; IRENA.",
+    "grid_carbon_kgco2_kwh": 0.48,
+    "grid_carbon_note": "Mexican grid carbon intensity ~0.45–0.52 kgCO2/kWh (2024), gas and oil dominated. Strong carbon argument for BIPV. Source: IEA Emissions Factors 2024.",
+    "economic_signal": "moderate-strong",
+    "primary_argument": "economic",
+    "incentives": [
+      "Medición Neta (net metering): available for distributed generation systems.",
+      "Accelerated depreciation for commercial solar: 100% in year 1 under Mexican tax law.",
+      "Federal PRODESEN plan supports distributed solar — check CRE for current incentive status."
+    ],
+    "precision_note": "Check current CFE tariff tier (especially DAC threshold) and net metering rules at cre.gob.mx. Contact local CFE office for interconnection requirements. Get quote from ANES member installer.",
+    "electricity_by_use_type": {
+      "residential": {
+        "price": 1.2,
+        "range_low": 0.8,
+        "range_high": 2.5,
+        "note": "Mexican residential: CFE tiered MXN 0.80–2.50/kWh (below DAC threshold)."
+      },
+      "commercial": {
+        "price": 2.0,
+        "range_low": 1.2,
+        "range_high": 4.5,
+        "note": "Mexican commercial: MXN 1.20–4.50/kWh. DAC consumers pay highest rates. Source: CFE 2024."
+      },
+      "industrial": {
+        "price": 1.8,
+        "range_low": 1.2,
+        "range_high": 3.5,
+        "note": "Mexican industrial: MXN 1.20–3.50/kWh. Source: CFE 2024."
+      },
+      "public": {
+        "price": 1.5,
+        "range_low": 1.0,
+        "range_high": 2.5,
+        "note": "Mexican public institutions on general service or special tariff. Source: CFE 2024."
+      },
+      "mixed": {
+        "price": 1.8,
+        "range_low": 1.2,
+        "range_high": 3.5,
+        "note": "Mixed-use: use dominant use type for primary calculation."
+      }
+    },
+    "use_type_tariff_note": "Mexican electricity prices vary by DAC (high consumption) threshold. Commercial users typically pay more than residential. Source: CFE tariff schedule 2024."
+  },
+  "australia": {
+    "match": {
+      "countries": [
+        "Australia",
+        "AUS"
+      ],
+      "keywords": [
+        "australia",
+        "sydney",
+        "melbourne",
+        "brisbane",
+        "perth",
+        "adelaide",
+        "canberra",
+        "gold coast",
+        "queensland",
+        "new south wales",
+        "victoria",
+        "western australia"
+      ]
+    },
+    "currency": "AUD",
+    "currency_symbol": "AUD",
+    "electricity_price_kwh": 0.35,
+    "electricity_price_range_low": 0.27,
+    "electricity_price_range_high": 0.45,
+    "electricity_price_note": "Australian residential electricity (2024–2025): NSW/VIC/QLD: AUD 0.27–0.38/kWh; WA: AUD 0.30/kWh; SA: AUD 0.38–0.45/kWh (highest). Source: AEMC Residential Electricity Price Trends 2024; GlobalPetrolPrices.",
+    "electricity_price_trend": "rising — significant increases since 2022 due to gas price linkage and network costs",
+    "export_compensation_kwh": 0.06,
+    "export_compensation_range_low": 0.02,
+    "export_compensation_range_high": 0.12,
+    "export_compensation_note": "Australian feed-in tariff: varies by state and retailer. Declining significantly — AUD 0.02–0.08/kWh typical. VIC guaranteed minimum AUD 0.038/kWh (2024). Source: state energy regulators 2024.",
+    "bipv_cost_facade_m2_low": 350,
+    "bipv_cost_facade_m2_high": 700,
+    "bipv_cost_roof_m2_low": 200,
+    "bipv_cost_roof_m2_high": 450,
+    "bipv_cost_note": "Australian BIPV installed cost in AUD/m2 (2024). Standard rooftop solar is cheapest globally but BIPV facade is a niche premium market. Source: SolarQuotes; Clean Energy Council 2024.",
+    "payback_years_low": 7,
+    "payback_years_high": 15,
+    "payback_note": "Simple payback for Australian BIPV (2024). Strong irradiation and high retail prices drive good economics. Source: Clean Energy Council 2024; ARENA.",
+    "grid_carbon_kgco2_kwh": 0.49,
+    "grid_carbon_note": "Australian national grid carbon ~0.46–0.53 kgCO2/kWh (2024), coal-dominated though declining rapidly. WA grid slightly higher. Strong carbon argument for BIPV. Source: DCCEEW Australian Energy Update 2024; IEA.",
+    "economic_signal": "strong",
+    "primary_argument": "economic",
+    "incentives": [
+      "Small-scale Technology Certificates (STCs): federal incentive for systems ≤100 kW. Reduces upfront cost by AUD 1,500–4,000 for typical system. Check rec-registry.gov.au.",
+      "State rebates: VIC Solar Homes; NSW Empowering Homes; QLD Battery Booster — check state energy department.",
+      "Large-scale Renewable Energy Target (LRET) and ARENA grants for commercial/institutional BIPV."
+    ],
+    "precision_note": "Check current STC deeming period and price at cleanenergyregulator.gov.au. Check state rebate at state energy department. Contact Clean Energy Council-accredited BIPV installer for installed cost/m2.",
+    "electricity_by_use_type": {
+      "residential": {
+        "price": 0.35,
+        "range_low": 0.27,
+        "range_high": 0.45,
+        "note": "Australian residential: AUD 0.27–0.45/kWh by state (AEMC 2024)."
+      },
+      "commercial": {
+        "price": 0.25,
+        "range_low": 0.18,
+        "range_high": 0.35,
+        "note": "Australian commercial: typically AUD 0.18–0.35/kWh depending on state, demand charges apply. Source: AEMC commercial energy prices 2024."
+      },
+      "industrial": {
+        "price": 0.16,
+        "range_low": 0.11,
+        "range_high": 0.24,
+        "note": "Australian industrial: AUD 0.11–0.24/kWh. Source: AEMC 2024."
+      },
+      "public": {
+        "price": 0.24,
+        "range_low": 0.18,
+        "range_high": 0.32,
+        "note": "Australian public buildings typically on commercial tariff."
+      },
+      "mixed": {
+        "price": 0.27,
+        "range_low": 0.2,
+        "range_high": 0.36,
+        "note": "Mixed-use: use dominant use type for primary calculation."
+      }
+    },
+    "use_type_tariff_note": "Australian commercial electricity is typically 25–35% cheaper than residential. Demand charges are common for commercial users and affect BIPV self-consumption economics. Source: AEMC 2024."
+  },
+  "singapore": {
+    "match": {
+      "countries": [
+        "Singapore",
+        "SGP"
+      ],
+      "keywords": [
+        "singapore"
+      ]
+    },
+    "currency": "SGD",
+    "currency_symbol": "SGD",
+    "electricity_price_kwh": 0.33,
+    "electricity_price_range_low": 0.28,
+    "electricity_price_range_high": 0.38,
+    "electricity_price_note": "Singapore residential electricity: approximately SGD 0.30–0.35/kWh (2024). Open electricity market — rates vary by retailer. Commercial: SGD 0.25–0.33/kWh. Among Asia's highest prices due to LNG import dependence. Source: EMA Singapore 2024.",
+    "electricity_price_trend": "volatile — linked to global LNG prices; stabilising in 2024 after 2022 spikes",
+    "export_compensation_kwh": 0.11,
+    "export_compensation_range_low": 0.08,
+    "export_compensation_range_high": 0.14,
+    "export_compensation_note": "Singapore Enhanced Central Intermediary Scheme (ECIS): excess solar exported at prevailing wholesale electricity price ~SGD 0.08–0.14/kWh. Self-consumption strongly preferred. Source: EMA Solar Guide 2024.",
+    "bipv_cost_facade_m2_low": 450,
+    "bipv_cost_facade_m2_high": 900,
+    "bipv_cost_roof_m2_low": 280,
+    "bipv_cost_roof_m2_high": 550,
+    "bipv_cost_note": "Singapore BIPV installed cost in SGD/m2 (2024). Higher than regional average due to labour costs and premium building standards. Source: SERIS 2024; EDB.",
+    "payback_years_low": 8,
+    "payback_years_high": 16,
+    "payback_note": "Simple payback for Singapore BIPV (2024). Consistent ~1,500 kWh/m2/yr irradiation and high electricity prices support economics. Source: SERIS 2024.",
+    "grid_carbon_kgco2_kwh": 0.41,
+    "grid_carbon_note": "Singapore grid carbon intensity ~0.40–0.43 kgCO2/kWh (2024), essentially all natural gas. No grid interconnection. Moderate carbon argument. Source: EMA Singapore Energy Statistics 2024; IEA.",
+    "economic_signal": "moderate-strong",
+    "primary_argument": "economic",
+    "incentives": [
+      "SolarNova programme: EDB facilitates large-scale solar on public buildings — model for private sector.",
+      "BCA Green Mark scheme: incentivises BIPV as part of building energy performance certification.",
+      "Enterprise Development Grant (EDG): for companies piloting clean energy including BIPV.",
+      "Singapore Green Plan 2030: 2 GWp solar target by 2030 — strong policy push."
+    ],
+    "precision_note": "Check current EMA solar connection requirements and ECIS export rates at ema.gov.sg. Contact BCA for Green Mark solar integration requirements. Get quote from EDB-supported solar developer or SERIS-connected contractor.",
+    "electricity_by_use_type": {
+      "residential": {
+        "price": 0.33,
+        "range_low": 0.28,
+        "range_high": 0.38,
+        "note": "Singapore residential: SGD 0.28–0.38/kWh (EMA 2024)."
+      },
+      "commercial": {
+        "price": 0.27,
+        "range_low": 0.22,
+        "range_high": 0.33,
+        "note": "Singapore commercial: SGD 0.22–0.33/kWh. Open electricity market — rates vary by retailer. Source: EMA 2024."
+      },
+      "industrial": {
+        "price": 0.22,
+        "range_low": 0.18,
+        "range_high": 0.28,
+        "note": "Singapore industrial: SGD 0.18–0.28/kWh. Source: EMA 2024."
+      },
+      "public": {
+        "price": 0.27,
+        "range_low": 0.22,
+        "range_high": 0.32,
+        "note": "Singapore public buildings on commercial tariff."
+      },
+      "mixed": {
+        "price": 0.28,
+        "range_low": 0.23,
+        "range_high": 0.34,
+        "note": "Mixed-use: use dominant use type for primary calculation."
+      }
+    },
+    "use_type_tariff_note": "Singapore commercial electricity is typically 15–20% cheaper than residential. All rates sensitive to global LNG prices. Source: EMA 2024."
+  },
+  "japan": {
+    "match": {
+      "countries": [
+        "Japan",
+        "JPN"
+      ],
+      "keywords": [
+        "japan",
+        "tokyo",
+        "osaka",
+        "kyoto",
+        "yokohama",
+        "nagoya",
+        "sapporo",
+        "fukuoka",
+        "kobe",
+        "hiroshima"
+      ]
+    },
+    "currency": "JPY",
+    "currency_symbol": "¥",
+    "electricity_price_kwh": 35,
+    "electricity_price_range_low": 28,
+    "electricity_price_range_high": 45,
+    "electricity_price_note": "Japanese residential electricity: approximately JPY 30–40/kWh (2024–2025). Spiked in 2022–2023 due to LNG dependence; partially offset by government subsidies in 2024. Source: METI 2024; GlobalPetrolPrices Sept 2025.",
+    "electricity_price_trend": "rising — government price subsidies being phased out 2024–2025; structural upward pressure from decarbonisation",
+    "export_compensation_kwh": 17,
+    "export_compensation_range_low": 10,
+    "export_compensation_range_high": 21,
+    "export_compensation_note": "Japan FIT (Fixed-price Purchase): residential solar ≤10 kW receives JPY 17–21/kWh for first 10 years (FY2024 rate JPY 17/kWh for new systems). After FIT period: self-consumption or market sale. Source: METI FIT/FIP rate FY2024.",
+    "bipv_cost_facade_m2_low": 55000,
+    "bipv_cost_facade_m2_high": 120000,
+    "bipv_cost_roof_m2_low": 35000,
+    "bipv_cost_roof_m2_high": 75000,
+    "bipv_cost_note": "Japanese BIPV installed cost in JPY/m2 (2024). Higher than Western markets due to seismic engineering requirements and premium labour. Source: JPEA (Japan Photovoltaic Energy Association) 2024.",
+    "payback_years_low": 9,
+    "payback_years_high": 17,
+    "payback_note": "Simple payback for Japanese BIPV (2024). Good irradiation and high electricity prices support economics. FIT period 10 years significantly improves returns. Source: JPEA 2024; METI.",
+    "grid_carbon_kgco2_kwh": 0.47,
+    "grid_carbon_note": "Japanese grid carbon intensity ~0.44–0.50 kgCO2/kWh (2024), heavily dependent on LNG and coal post-Fukushima. Some nuclear restarting. Strong carbon argument. Source: IEA Emissions Factors 2024; METI.",
+    "economic_signal": "moderate-strong",
+    "primary_argument": "carbon",
+    "incentives": [
+      "Feed-in Tariff (FIT): JPY 17/kWh for systems under 10 kW (FY2024). Guaranteed 10 years. Apply via fit-portal.go.jp.",
+      "Feed-in Premium (FIP): for larger systems — market price plus premium.",
+      "ZEB (Zero Energy Building) subsidy: MLIT and METI programmes for BIPV in zero-energy projects.",
+      "Mandatory solar on new homes in Tokyo from 2025 — other municipalities expected to follow."
+    ],
+    "precision_note": "Check current FIT/FIP rate at fit-portal.go.jp. Contact local power utility (TEPCO, Kansai Electric etc.) for grid connection requirements. Get quote from JPEA member installer.",
+    "electricity_by_use_type": {
+      "residential": {
+        "price": 35,
+        "range_low": 28,
+        "range_high": 45,
+        "note": "Japanese residential: JPY 28–45/kWh (METI 2024)."
+      },
+      "commercial": {
+        "price": 28,
+        "range_low": 22,
+        "range_high": 38,
+        "note": "Japanese commercial (low-voltage business): JPY 22–38/kWh. Source: METI/utility tariffs 2024."
+      },
+      "industrial": {
+        "price": 18,
+        "range_low": 14,
+        "range_high": 26,
+        "note": "Japanese industrial (high-voltage): JPY 14–26/kWh. Source: METI 2024."
+      },
+      "public": {
+        "price": 28,
+        "range_low": 22,
+        "range_high": 36,
+        "note": "Japanese public buildings on commercial/low-voltage business tariff."
+      },
+      "mixed": {
+        "price": 30,
+        "range_low": 24,
+        "range_high": 40,
+        "note": "Mixed-use: use dominant use type for primary calculation."
+      }
+    },
+    "use_type_tariff_note": "Japanese commercial electricity is typically 20% cheaper than residential; industrial significantly cheaper. Source: METI electricity tariff analysis 2024."
+  },
+  "china": {
+    "match": {
+      "countries": [
+        "China",
+        "CHN",
+        "CN",
+        "PRC"
+      ],
+      "keywords": [
+        "china",
+        "beijing",
+        "shanghai",
+        "guangzhou",
+        "shenzhen",
+        "chengdu",
+        "hangzhou",
+        "wuhan",
+        "nanjing",
+        "xi'an",
+        "xian",
+        "chongqing",
+        "tianjin",
+        "suzhou"
+      ]
+    },
+    "currency": "CNY",
+    "currency_symbol": "¥",
+    "electricity_price_kwh": 0.65,
+    "electricity_price_range_low": 0.4,
+    "electricity_price_range_high": 1.2,
+    "electricity_price_note": "Chinese commercial/industrial electricity: approximately CNY 0.60–0.90/kWh (2024) with TOU pricing expanding. Residential: CNY 0.40–0.60/kWh, varies by province and tier. Source: NDRC electricity pricing 2024; NEA.",
+    "electricity_price_trend": "increasing — TOU pricing expanding; market reform reducing subsidies for large commercial users",
+    "export_compensation_kwh": 0.37,
+    "export_compensation_range_low": 0.25,
+    "export_compensation_range_high": 0.5,
+    "export_compensation_note": "Chinese distributed PV surplus feed-in: benchmark price varies by province CNY 0.25–0.50/kWh. Self-consumption strongly preferred. Source: NEA distributed PV policy 2024.",
+    "bipv_cost_facade_m2_low": 900,
+    "bipv_cost_facade_m2_high": 2500,
+    "bipv_cost_roof_m2_low": 600,
+    "bipv_cost_roof_m2_high": 1400,
+    "bipv_cost_note": "Chinese BIPV installed cost in CNY/m2 (2024). PV module costs globally lowest in China. Facade/curtain wall BIPV includes premium for architectural integration. Source: CPIA 2024; BloombergNEF.",
+    "payback_years_low": 5,
+    "payback_years_high": 12,
+    "payback_note": "Simple payback for Chinese BIPV (2024). Low module cost and expanding commercial electricity prices drive strong economics. Source: CPIA; NDRC.",
+    "grid_carbon_kgco2_kwh": 0.55,
+    "grid_carbon_note": "Chinese grid carbon intensity ~0.52–0.58 kgCO2/kWh (2024), coal-dominated but declining rapidly as solar/wind scale. Strong carbon argument for BIPV. Source: IEA Emissions Factors 2024; MEE China.",
+    "economic_signal": "strong",
+    "primary_argument": "carbon",
+    "incentives": [
+      "National distributed PV subsidy: varies annually — check NEA announcements. Policy strongly supports building-integrated solar.",
+      "BIPV promoted under 14th Five-Year Plan (2021–2025) — MIIT and MOHURD directives.",
+      "Provincial green building standards (绿色建筑): increasingly require solar integration for new large-scale buildings.",
+      "National ETS (carbon trading market): expanding coverage strengthens long-term carbon argument.",
+      "Zero-carbon building pilots: Shenzhen, Shanghai, Beijing leading."
+    ],
+    "precision_note": "Check provincial distributed PV subsidy and benchmark price at local DRC/NEA. Contact local state grid (国家电网/南方电网) for connection requirements. Get cost quote from CPIA member BIPV manufacturer/contractor.",
+    "electricity_by_use_type": {
+      "residential": {
+        "price": 0.55,
+        "range_low": 0.4,
+        "range_high": 0.65,
+        "note": "Chinese residential: CNY 0.40–0.65/kWh, tiered and subsidised. Lower consumption tiers are cheaper."
+      },
+      "commercial": {
+        "price": 0.8,
+        "range_low": 0.6,
+        "range_high": 1.2,
+        "note": "Chinese commercial/tertiary: CNY 0.60–1.20/kWh with TOU pricing. Higher than residential in most provinces."
+      },
+      "industrial": {
+        "price": 0.7,
+        "range_low": 0.5,
+        "range_high": 1.0,
+        "note": "Chinese industrial: CNY 0.50–1.00/kWh with TOU. Source: NDRC 2024."
+      },
+      "public": {
+        "price": 0.65,
+        "range_low": 0.5,
+        "range_high": 0.85,
+        "note": "Chinese public institutions typically on non-residential tariff. Source: NDRC 2024."
+      },
+      "mixed": {
+        "price": 0.7,
+        "range_low": 0.55,
+        "range_high": 0.95,
+        "note": "Mixed-use: use dominant use type for primary calculation."
+      }
+    },
+    "use_type_tariff_note": "In China, commercial and industrial users often pay MORE than residential, due to TOU pricing and cross-subsidy structures. This makes the BIPV self-consumption economic case particularly strong for commercial buildings. Source: NDRC electricity pricing 2024."
+  },
+  "india": {
+    "match": {
+      "countries": [
+        "India",
+        "IND"
+      ],
+      "keywords": [
+        "india",
+        "delhi",
+        "mumbai",
+        "bangalore",
+        "bengaluru",
+        "chennai",
+        "hyderabad",
+        "kolkata",
+        "pune",
+        "ahmedabad",
+        "jaipur",
+        "surat"
+      ]
+    },
+    "currency": "INR",
+    "currency_symbol": "₹",
+    "electricity_price_kwh": 7.5,
+    "electricity_price_range_low": 4.0,
+    "electricity_price_range_high": 12.0,
+    "electricity_price_note": "Indian commercial/residential electricity varies significantly by state and category. Commercial: ₹6–12/kWh. Residential: ₹4–8/kWh (subsidised in some states). Source: state electricity regulatory commissions 2024; MNRE.",
+    "electricity_price_trend": "rising — cross-subsidy reform underway; commercial tariffs increasing fastest",
+    "export_compensation_kwh": 3.0,
+    "export_compensation_range_low": 2.0,
+    "export_compensation_range_high": 5.0,
+    "export_compensation_note": "Indian net metering: MNRE Net Metering Regulations 2021 mandate net metering up to 500 kW. Export credited at APPC (average power purchase cost) ~₹2–5/kWh. Self-consumption preferred. Source: CERC 2024.",
+    "bipv_cost_facade_m2_low": 7000,
+    "bipv_cost_facade_m2_high": 18000,
+    "bipv_cost_roof_m2_low": 4000,
+    "bipv_cost_roof_m2_high": 10000,
+    "bipv_cost_note": "Indian BIPV installed cost in INR/m2 (2024). Rapidly declining due to domestic manufacturing growth. Source: MNRE solar tariff data 2024; Bridge to India.",
+    "payback_years_low": 4,
+    "payback_years_high": 10,
+    "payback_note": "Simple payback for Indian BIPV (2024). Excellent irradiation (1,500–2,000+ kWh/m2/yr) and falling costs drive strong economics. Source: MNRE; Bridge to India 2024.",
+    "grid_carbon_kgco2_kwh": 0.71,
+    "grid_carbon_note": "Indian grid carbon intensity ~0.68–0.74 kgCO2/kWh (2024), coal-dominated. Very strong carbon argument for BIPV — among highest intensity major economies. Source: CEA Annual Report 2024; IEA Emissions Factors.",
+    "economic_signal": "strong",
+    "primary_argument": "carbon",
+    "incentives": [
+      "PM Surya Ghar Muft Bijli Yojana (2024): residential rooftop solar scheme — 300 units/month free electricity for systems up to 3 kW.",
+      "MNRE capital subsidy: ₹14,588/kW up to 2 kW; ₹7,294/kW additional for 2–3 kW residential.",
+      "Net metering: mandatory for systems up to 500 kW (MNRE 2021).",
+      "IGBC and GRIHA green building ratings reward BIPV integration.",
+      "PLI scheme for domestic solar manufacturing reduces module costs."
+    ],
+    "precision_note": "Check state electricity tariff and net metering rate at state SERC website. Check MNRE subsidy status at mnre.gov.in. Contact DISCOM for grid connection. Get quote from MNRE-empanelled installer.",
+    "electricity_by_use_type": {
+      "residential": {
+        "price": 5.5,
+        "range_low": 3.0,
+        "range_high": 8.0,
+        "note": "Indian residential: INR 3–8/kWh, tiered and subsidised in many states."
+      },
+      "commercial": {
+        "price": 9.0,
+        "range_low": 6.0,
+        "range_high": 12.0,
+        "note": "Indian commercial: INR 6–12/kWh — significantly higher than residential. Strong BIPV economic case for commercial buildings. Source: state SERCs 2024."
+      },
+      "industrial": {
+        "price": 7.5,
+        "range_low": 5.0,
+        "range_high": 11.0,
+        "note": "Indian industrial: INR 5–11/kWh depending on HT/LT category and state. Source: state SERCs 2024."
+      },
+      "public": {
+        "price": 6.0,
+        "range_low": 4.0,
+        "range_high": 9.0,
+        "note": "Indian public buildings (schools, hospitals): typically on LT-commercial or public institution tariff. Source: state SERCs 2024."
+      },
+      "mixed": {
+        "price": 7.5,
+        "range_low": 5.0,
+        "range_high": 10.0,
+        "note": "Mixed-use: use dominant use type for primary calculation."
+      }
+    },
+    "use_type_tariff_note": "In India, commercial users often pay 50–100% more than residential users, and cross-subsidise residential rates. This makes BIPV particularly compelling for commercial buildings. Source: state Electricity Regulatory Commissions 2024."
+  },
+  "middle_east_gulf": {
+    "match": {
+      "countries": [
+        "United Arab Emirates",
+        "UAE",
+        "Saudi Arabia",
+        "Qatar",
+        "Kuwait",
+        "Bahrain",
+        "Oman"
+      ],
+      "keywords": [
+        "dubai",
+        "abu dhabi",
+        "uae",
+        "saudi",
+        "qatar",
+        "kuwait",
+        "bahrain",
+        "oman",
+        "riyadh",
+        "doha",
+        "muscat",
+        "sharjah",
+        "ajman"
+      ]
+    },
+    "currency": "USD",
+    "currency_symbol": "$",
+    "electricity_price_kwh": 0.08,
+    "electricity_price_range_low": 0.01,
+    "electricity_price_range_high": 0.1,
+    "electricity_price_note": "Gulf residential electricity: heavily subsidised. UAE (DEWA Dubai): AED 0.23–0.38/kWh by consumption tier (~USD 0.06–0.10/kWh). Saudi Arabia: SAR 0.05–0.20/kWh (~USD 0.01–0.05/kWh) — among world's cheapest. Qatar: ~USD 0.017/kWh. Bahrain: ~USD 0.01/kWh. Source: utility tariff sheets 2024.",
+    "electricity_price_trend": "slowly rising as subsidy reform continues; UAE most advanced in reform",
+    "export_compensation_kwh": 0.05,
+    "export_compensation_range_low": 0.03,
+    "export_compensation_range_high": 0.08,
+    "export_compensation_note": "UAE Shams Dubai (DEWA net metering): excess credited at generation tariff ~AED 0.18–0.22/kWh (~USD 0.05/kWh). Other Gulf states have limited or no export compensation. Self-consumption is the dominant economic case. Source: DEWA Shams Dubai 2024.",
+    "bipv_cost_facade_m2_low": 300,
+    "bipv_cost_facade_m2_high": 700,
+    "bipv_cost_roof_m2_low": 180,
+    "bipv_cost_roof_m2_high": 420,
+    "bipv_cost_note": "Gulf BIPV installed cost in USD/m2 (2024). Dubai and Abu Dhabi have competitive contractor market. Source: DEWA; NEOM project data.",
+    "payback_years_low": 12,
+    "payback_years_high": 30,
+    "payback_note": "Simple payback for Gulf BIPV (2024). Excellent irradiation but very cheap electricity makes savings-based economic case challenging. Primary arguments are cooling load reduction, carbon commitments (UAE Net Zero 2050, KSA Net Zero 2060), and architectural quality. Source: IEA; IRENA.",
+    "grid_carbon_kgco2_kwh": 0.4,
+    "grid_carbon_note": "Gulf grid carbon intensity ~0.38–0.45 kgCO2/kWh (2024), essentially all natural gas. Moderate carbon argument. UAE Net Zero 2050 and KSA Net Zero 2060 improve long-term context. Source: IEA Emissions Factors 2024; IRENA.",
+    "economic_signal": "marginal",
+    "primary_argument": "architectural",
+    "incentives": [
+      "UAE Shams Dubai net metering: DEWA allows residential and commercial rooftop solar export.",
+      "Dubai Clean Energy Strategy 2050: 75% clean energy target — regulatory environment supports BIPV.",
+      "Saudi Vision 2030 NEOM and Red Sea Project: large-scale BIPV in giga-projects.",
+      "Qatar National Vision 2030 sustainability requirements for major developments."
+    ],
+    "precision_note": "For UAE: check DEWA Shams programme at dewa.gov.ae. For Saudi Arabia: check SEC net metering rules and REPDO programme. The economic case for BIPV in the Gulf is primarily architectural value, cooling load reduction, and regulatory compliance — not electricity savings. Frame payback accordingly.",
+    "electricity_by_use_type": {
+      "residential": {
+        "price": 0.06,
+        "range_low": 0.01,
+        "range_high": 0.1,
+        "note": "Gulf residential: heavily subsidised. UAE (DEWA) AED 0.23–0.38/kWh ~USD 0.06–0.10/kWh; Saudi Arabia ~USD 0.01–0.05/kWh."
+      },
+      "commercial": {
+        "price": 0.08,
+        "range_low": 0.04,
+        "range_high": 0.14,
+        "note": "Gulf commercial: typically slightly higher than residential or equal. UAE commercial DEWA ~AED 0.30–0.50/kWh (~USD 0.08–0.14/kWh). Source: DEWA tariff 2024."
+      },
+      "industrial": {
+        "price": 0.07,
+        "range_low": 0.03,
+        "range_high": 0.12,
+        "note": "Gulf industrial: subsidised rates. UAE: ~USD 0.03–0.12/kWh. Source: DEWA industrial tariff 2024."
+      },
+      "public": {
+        "price": 0.05,
+        "range_low": 0.01,
+        "range_high": 0.09,
+        "note": "Gulf public buildings (government, hospitals, schools): typically heavily subsidised, often lowest category."
+      },
+      "mixed": {
+        "price": 0.07,
+        "range_low": 0.03,
+        "range_high": 0.11,
+        "note": "Mixed-use: use dominant use type for primary calculation."
+      }
+    },
+    "use_type_tariff_note": "Gulf electricity tariffs are heavily subsidised across all use types. Differences between categories are small relative to other regions. The economic case for BIPV is weak regardless of use type. Source: DEWA, ACWA, national utility tariffs 2024."
+  },
+  "africa_generic": {
+    "match": {
+      "countries": [
+        "South Africa",
+        "Kenya",
+        "Nigeria",
+        "Egypt",
+        "Morocco",
+        "Ghana",
+        "Ethiopia",
+        "Tanzania",
+        "Uganda"
+      ],
+      "keywords": [
+        "africa",
+        "south africa",
+        "kenya",
+        "nigeria",
+        "egypt",
+        "morocco",
+        "ghana",
+        "ethiopia",
+        "tanzania",
+        "johannesburg",
+        "cape town",
+        "nairobi",
+        "lagos",
+        "cairo",
+        "casablanca",
+        "accra",
+        "addis ababa"
+      ]
+    },
+    "currency": "USD",
+    "currency_symbol": "$",
+    "electricity_price_kwh": 0.14,
+    "electricity_price_range_low": 0.04,
+    "electricity_price_range_high": 0.28,
+    "electricity_price_note": "African electricity prices vary enormously. South Africa (Eskom): ~ZAR 2.50–3.80/kWh (~USD 0.13–0.20/kWh, 2024, rising sharply). Kenya: ~USD 0.19–0.27/kWh. Nigeria: subsidised official ~USD 0.04/kWh but actual cost with generator backup much higher. Morocco: ~USD 0.11–0.14/kWh. Source: national utility tariffs 2024.",
+    "electricity_price_trend": "rising strongly in most markets — South Africa seeing 15–20% annual increases; subsidy reform across the continent",
+    "export_compensation_kwh": null,
+    "export_compensation_note": "Export/net metering schemes nascent in most African markets. South Africa: SSEG at municipal level, typically ZAR 0.50–1.50/kWh. Kenya: KPLC net metering pilot. Nigeria: no national scheme. Source: SSEG municipal programmes 2024.",
+    "bipv_cost_facade_m2_low": 200,
+    "bipv_cost_facade_m2_high": 600,
+    "bipv_cost_roof_m2_low": 120,
+    "bipv_cost_roof_m2_high": 380,
+    "bipv_cost_note": "African BIPV installed cost in USD/m2 (2024). Varies significantly by country — South Africa and Morocco have competitive markets. Source: IRENA Africa solar market survey 2024.",
+    "payback_years_low": 5,
+    "payback_years_high": 18,
+    "payback_note": "Simple payback for African BIPV (2024). South Africa: 6–12 years (load-shedding resilience premium adds value). Kenya, Morocco: 8–15 years. Nigeria: difficult to calculate due to grid unreliability. Source: IRENA 2024.",
+    "grid_carbon_kgco2_kwh": 0.55,
+    "grid_carbon_note": "African grid carbon varies: South Africa ~0.82 kgCO2/kWh (coal — strong carbon argument); Kenya ~0.04 kgCO2/kWh (geothermal/hydro); Nigeria ~0.43; Egypt ~0.45; Morocco ~0.45. Use country-specific value. Source: IEA Emissions Factors 2024.",
+    "economic_signal": "moderate-strong",
+    "primary_argument": "economic",
+    "incentives": [
+      "South Africa: Section 12B tax incentive — 125% deduction for renewable energy assets. SSEG net metering at municipal level.",
+      "Kenya: VAT exemption on solar equipment; Capital Goods Remission Scheme.",
+      "Morocco: MASEN programme and net metering framework for distributed solar.",
+      "Nigeria: Rural Electrification Agency (REA) supports off-grid and distributed solar.",
+      "IFC, AfDB, and DFI green building finance instruments available for qualifying BIPV projects."
+    ],
+    "precision_note": "Check national utility tariff and net metering/SSEG rules with local utility. Contact national solar association (SAPVIA for SA, SEKAN for Kenya, NAFSMA for Nigeria). For major projects, check IFC/AfDB green building financing eligibility.",
+    "electricity_by_use_type": {
+      "residential": {
+        "price": 0.12,
+        "range_low": 0.04,
+        "range_high": 0.22,
+        "note": "African residential: highly variable. South Africa ~USD 0.13–0.20/kWh; Kenya ~USD 0.19/kWh; Nigeria ~USD 0.04/kWh official."
+      },
+      "commercial": {
+        "price": 0.16,
+        "range_low": 0.06,
+        "range_high": 0.28,
+        "note": "African commercial: typically higher than residential in most markets. South Africa commercial ~USD 0.16–0.24/kWh. Source: Eskom 2024."
+      },
+      "industrial": {
+        "price": 0.12,
+        "range_low": 0.05,
+        "range_high": 0.22,
+        "note": "African industrial: large consumers may receive discounted rates. South Africa heavy industrial ~USD 0.12–0.18/kWh. Source: Eskom 2024."
+      },
+      "public": {
+        "price": 0.13,
+        "range_low": 0.05,
+        "range_high": 0.2,
+        "note": "African public buildings typically on commercial or special institution tariff."
+      },
+      "mixed": {
+        "price": 0.14,
+        "range_low": 0.05,
+        "range_high": 0.22,
+        "note": "Mixed-use: use dominant use type for primary calculation."
+      }
+    },
+    "use_type_tariff_note": "African electricity tariffs vary enormously by country and use type. South Africa and Kenya have the most developed tariff structures with significant residential/commercial/industrial differentiation. Source: national utility tariffs 2024."
+  },
+  "turkey": {
+    "match": {
+      "countries": [
+        "Turkey",
+        "Türkiye",
+        "TUR"
+      ],
+      "keywords": [
+        "turkey",
+        "türkiye",
+        "istanbul",
+        "ankara",
+        "izmir",
+        "bursa",
+        "antalya",
+        "gaziantep"
+      ]
+    },
+    "currency": "TRY",
+    "currency_symbol": "TRY",
+    "electricity_price_kwh": 4.5,
+    "electricity_price_range_low": 3.2,
+    "electricity_price_range_high": 6.5,
+    "electricity_price_note": "Turkish residential electricity: approximately TRY 4.50–6.50/kWh (2024–2025). Prices have risen extremely rapidly due to high inflation. At mid-2024 exchange rates: ~USD 0.13–0.19/kWh. Source: EPDK tariff bulletin 2024.",
+    "electricity_price_trend": "rising sharply — frequent EPDK adjustments tracking inflation; TRY depreciation makes USD-equivalent volatile",
+    "export_compensation_kwh": 1.5,
+    "export_compensation_range_low": 1.2,
+    "export_compensation_range_high": 2.0,
+    "export_compensation_note": "Turkish net metering (unlicensed distributed generation): excess credited at purchase price from licensed supplier. Self-consumption strongly preferred. Source: EPDK regulation 2024.",
+    "bipv_cost_facade_m2_low": 6000,
+    "bipv_cost_facade_m2_high": 15000,
+    "bipv_cost_roof_m2_low": 4000,
+    "bipv_cost_roof_m2_high": 9000,
+    "bipv_cost_note": "Turkish BIPV installed cost in TRY/m2 (2024). Volatile due to currency effects — verify USD equivalent at current exchange rate. Source: GUNDER (Turkish solar energy association) 2024.",
+    "payback_years_low": 4,
+    "payback_years_high": 10,
+    "payback_note": "Simple payback for Turkish BIPV (2024, nominal TRY terms). Very short due to high nominal electricity prices — real payback inflation-adjusted closer to 7–14 years. Source: GUNDER 2024; EMRA.",
+    "grid_carbon_kgco2_kwh": 0.45,
+    "grid_carbon_note": "Turkish grid carbon intensity ~0.42–0.48 kgCO2/kWh (2024), mix of natural gas, coal, hydro, and growing wind/solar. Moderate-strong carbon argument. Declining as renewables scale. Source: IEA Emissions Factors 2024; TEIAS.",
+    "economic_signal": "strong",
+    "primary_argument": "economic",
+    "incentives": [
+      "YEKA programme: supports large-scale solar including BIPV.",
+      "Unlicensed electricity generation regulation: net metering for rooftop systems up to 1 MW.",
+      "YEKDEM feed-in tariff for licensed systems: USD-denominated ~USD 0.073/kWh (10-year period).",
+      "Turkey 2053 Net Zero target and Solar Energy Strategy 2035 — strong policy push."
+    ],
+    "precision_note": "Check current EPDK tariff at epdk.gov.tr. Contact local EDAS (electricity distribution company) for connection requirements. Get quote from GUNDER member installer. Calculate paybacks in both TRY nominal and USD real terms given currency volatility.",
+    "electricity_by_use_type": {
+      "residential": {
+        "price": 4.5,
+        "range_low": 3.2,
+        "range_high": 6.5,
+        "note": "Turkish residential: TRY 3.20–6.50/kWh (EPDK 2024). High inflation means frequent revision."
+      },
+      "commercial": {
+        "price": 6.0,
+        "range_low": 4.5,
+        "range_high": 8.0,
+        "note": "Turkish commercial (low voltage): TRY 4.50–8.00/kWh. Often higher than residential. Source: EPDK 2024."
+      },
+      "industrial": {
+        "price": 5.5,
+        "range_low": 4.0,
+        "range_high": 7.5,
+        "note": "Turkish industrial (medium/high voltage): TRY 4.00–7.50/kWh. Source: EPDK 2024."
+      },
+      "public": {
+        "price": 5.0,
+        "range_low": 3.5,
+        "range_high": 7.0,
+        "note": "Turkish public institutions on commercial/general tariff. Source: EPDK 2024."
+      },
+      "mixed": {
+        "price": 5.5,
+        "range_low": 4.0,
+        "range_high": 7.5,
+        "note": "Mixed-use: use dominant use type for primary calculation."
+      }
+    },
+    "use_type_tariff_note": "Turkish commercial electricity is typically higher than residential due to tariff structure. All values in TRY — verify USD equivalent at current exchange rate due to currency volatility. Source: EPDK tariff bulletin 2024."
+  },
+  "russia": {
+    "match": {
+      "countries": [
+        "Russia",
+        "Russian Federation",
+        "RUS"
+      ],
+      "keywords": [
+        "russia",
+        "russian federation",
+        "moscow",
+        "saint petersburg",
+        "novosibirsk",
+        "yekaterinburg",
+        "kazan",
+        "krasnoyarsk"
+      ]
+    },
+    "currency": "RUB",
+    "currency_symbol": "RUB",
+    "electricity_price_kwh": 5.0,
+    "electricity_price_range_low": 3.0,
+    "electricity_price_range_high": 8.0,
+    "electricity_price_note": "Russian residential electricity: approximately RUB 4–6/kWh (2024), heavily subsidised. Commercial rates higher: RUB 6–10/kWh. Very low by international standards. Source: FAS Russia regulated tariffs 2024.",
+    "electricity_price_trend": "slowly rising — annual regulated tariff adjustments typically 5–10%; faster in some regions",
+    "export_compensation_kwh": null,
+    "export_compensation_note": "Russia has no national net metering scheme as of 2024. Microgeneration law (2021) allows systems up to 15 kW to sell surplus at wholesale price — minimal economic incentive given low electricity prices. Source: Russian microgeneration law 2021.",
+    "bipv_cost_facade_m2_low": 20000,
+    "bipv_cost_facade_m2_high": 60000,
+    "bipv_cost_roof_m2_low": 12000,
+    "bipv_cost_roof_m2_high": 35000,
+    "bipv_cost_note": "Russian BIPV installed cost in RUB/m2 (2024). Market is nascent and largely import-dependent post-2022. Costs increased significantly due to sanctions and supply chain disruption. Source: RAWI estimates 2024.",
+    "payback_years_low": 20,
+    "payback_years_high": 40,
+    "payback_note": "Simple payback for Russian BIPV (2024). Very long due to extremely low electricity prices. Economic case is very weak — primary argument is architectural quality, energy independence, or prestige project contexts. Source: Skolkovo Energy Centre 2024.",
+    "grid_carbon_kgco2_kwh": 0.3,
+    "grid_carbon_note": "Russian grid carbon intensity ~0.28–0.33 kgCO2/kWh (2024), mix of natural gas (~45%), nuclear (~20%), and hydro (~20%). Moderate carbon intensity. Source: IEA Emissions Factors 2024; Rosstat.",
+    "economic_signal": "weak",
+    "primary_argument": "architectural",
+    "incentives": [
+      "Microgeneration law (Federal Law No. 471-FZ, 2021): allows surplus sale for systems up to 15 kW — minimal economic value at current prices.",
+      "Federal energy efficiency programme: some federal/regional subsidies for energy-efficient buildings.",
+      "ESG and green building certification (GOST R GREEN, BREEAM Russia): supports BIPV for premium commercial developments."
+    ],
+    "precision_note": "The economic case for BIPV in Russia is very weak given subsidised electricity prices. Frame the project argument around architectural quality, energy resilience, ESG/green certification, or export market positioning. Note: international sanctions (2022+) may affect equipment supply chains and financing.",
+    "electricity_by_use_type": {
+      "residential": {
+        "price": 5.0,
+        "range_low": 3.0,
+        "range_high": 8.0,
+        "note": "Russian residential: RUB 3–8/kWh, subsidised. Source: FAS regulated tariffs 2024."
+      },
+      "commercial": {
+        "price": 8.0,
+        "range_low": 5.0,
+        "range_high": 12.0,
+        "note": "Russian commercial: RUB 5–12/kWh. Non-regulated segments significantly higher than residential. Source: FAS 2024."
+      },
+      "industrial": {
+        "price": 6.0,
+        "range_low": 4.0,
+        "range_high": 10.0,
+        "note": "Russian industrial: RUB 4–10/kWh depending on voltage level. Source: FAS 2024."
+      },
+      "public": {
+        "price": 7.0,
+        "range_low": 5.0,
+        "range_high": 10.0,
+        "note": "Russian public buildings typically on non-regulated or social institution tariff."
+      },
+      "mixed": {
+        "price": 7.0,
+        "range_low": 5.0,
+        "range_high": 10.0,
+        "note": "Mixed-use: use dominant use type for primary calculation."
+      }
+    },
+    "use_type_tariff_note": "Russian commercial and industrial electricity is significantly more expensive than subsidised residential rates, but still low by international standards. Economic case for BIPV remains very weak across all use types. Source: FAS Russia 2024."
+  },
+  "asia_generic": {
+    "match": {
+      "countries": [],
+      "keywords": [
+        "asia",
+        "southeast asia",
+        "east asia",
+        "south asia",
+        "vietnam",
+        "thailand",
+        "malaysia",
+        "indonesia",
+        "philippines",
+        "myanmar",
+        "cambodia",
+        "bangladesh",
+        "pakistan",
+        "sri lanka",
+        "taiwan",
+        "south korea",
+        "korea",
+        "hanoi",
+        "ho chi minh",
+        "bangkok",
+        "kuala lumpur",
+        "jakarta",
+        "manila",
+        "seoul",
+        "taipei"
+      ]
+    },
+    "currency": "USD",
+    "currency_symbol": "$",
+    "electricity_price_kwh": 0.12,
+    "electricity_price_range_low": 0.06,
+    "electricity_price_range_high": 0.22,
+    "electricity_price_note": "Asian electricity prices vary enormously. South Korea: ~KRW 130–160/kWh (~USD 0.10–0.12/kWh, KEPCO 2024). Taiwan: TWD 2.6–6.0/kWh (~USD 0.08–0.19/kWh). Vietnam: ~USD 0.07–0.12/kWh. Thailand: ~USD 0.10–0.16/kWh. Malaysia: ~USD 0.05–0.12/kWh (subsidised). Source: national utility tariffs 2024.",
+    "electricity_price_trend": "rising in most markets — subsidy reform, grid investment, and LNG price pass-through",
+    "export_compensation_kwh": null,
+    "export_compensation_note": "Export/net metering varies by country. South Korea: RPS+SMP+REC system. Taiwan: FIT available. Vietnam: NEM pilot (2023). Thailand: SPP/VSPP programmes. Source: national energy regulatory bodies 2024.",
+    "bipv_cost_facade_m2_low": 200,
+    "bipv_cost_facade_m2_high": 600,
+    "bipv_cost_roof_m2_low": 120,
+    "bipv_cost_roof_m2_high": 380,
+    "bipv_cost_note": "Asian BIPV installed cost in USD/m2 (2024). South Korea/Taiwan: USD 200–550/m2 facade. SE Asia: USD 150–450/m2 facade. Source: IEA PVPS Task 15 2024; BloombergNEF Asia.",
+    "payback_years_low": 6,
+    "payback_years_high": 18,
+    "payback_note": "Simple payback for Asian BIPV (2024). Korea/Taiwan: 10–18 years. SE Asia with high irradiation and rising tariffs: 6–12 years. Source: IEA PVPS; national solar associations.",
+    "grid_carbon_kgco2_kwh": 0.5,
+    "grid_carbon_note": "Asian grid carbon varies widely. South Korea ~0.42; Taiwan ~0.50; Vietnam ~0.60; Thailand ~0.47; Malaysia ~0.55; Philippines ~0.61 kgCO2/kWh (2024). Most Asian grids are carbon-intensive — strong carbon argument for BIPV. Source: IEA Emissions Factors 2024; Ember Asia.",
+    "economic_signal": "moderate",
+    "primary_argument": "carbon",
+    "incentives": [
+      "South Korea: RPS system for large projects; net metering for small systems; G-SEED green building certification rewards BIPV.",
+      "Taiwan: FIT for solar; net metering available; EEWH Green Building Label points for BIPV.",
+      "Vietnam: Net Energy Metering (NEM) pilot expanding; corporate PPA growing.",
+      "Thailand: SPP/VSPP feed-in available.",
+      "ASEAN Plan of Action for Energy Cooperation (APAEC): 23% renewables target by 2025."
+    ],
+    "precision_note": "Check national energy regulatory authority for current feed-in tariff, net metering rules, and grid connection requirements. Contact national solar industry association for installed cost benchmarks. For international projects, IFC and ADB green building finance may be available.",
+    "electricity_by_use_type": {
+      "residential": {
+        "price": 0.1,
+        "range_low": 0.06,
+        "range_high": 0.19,
+        "note": "Asian residential (SE Asia): USD 0.06–0.19/kWh by country."
+      },
+      "commercial": {
+        "price": 0.14,
+        "range_low": 0.08,
+        "range_high": 0.22,
+        "note": "Asian commercial: typically higher than residential in most SE Asian markets. Source: national utility tariffs 2024."
+      },
+      "industrial": {
+        "price": 0.11,
+        "range_low": 0.07,
+        "range_high": 0.18,
+        "note": "Asian industrial: USD 0.07–0.18/kWh by country and voltage level. Source: national utility tariffs 2024."
+      },
+      "public": {
+        "price": 0.12,
+        "range_low": 0.07,
+        "range_high": 0.19,
+        "note": "Asian public buildings typically on commercial or special institution tariff."
+      },
+      "mixed": {
+        "price": 0.12,
+        "range_low": 0.08,
+        "range_high": 0.2,
+        "note": "Mixed-use: use dominant use type for primary calculation."
+      }
+    },
+    "use_type_tariff_note": "Asian electricity tariff structures vary significantly by country. Commercial and industrial users often pay more than residential in SE Asia. Source: national utility tariffs 2024."
+  }
+}
