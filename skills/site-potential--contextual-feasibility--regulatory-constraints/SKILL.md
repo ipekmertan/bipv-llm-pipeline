@@ -87,6 +87,14 @@ Regulatory constraints are a **location and building type** level analysis. Scal
 
 ## Output Modes
 
+The three output modes must complement each other:
+
+- **Key takeaway** = decision and priorities: the regulatory stance and the one or two constraints that matter most for early design.
+- **Explain the numbers** = evidence and terminology: what rules, thresholds, permit paths, dates, and source facts were found, and what each one means.
+- **Design implication** = action recipe: how the architect should adapt surfaces, materials, visibility, documentation, and timeline.
+
+Each mode must be understandable on its own, but it should not repeat the full content of the other two modes. If two modes would produce nearly the same answer, state the overlap clearly and shift the emphasis rather than repeating.
+
 ### If "Explain the numbers" selected:
 **What the LLM produces:**
 - Full overview of applicable planning requirements for the location
@@ -94,6 +102,9 @@ Regulatory constraints are a **location and building type** level analysis. Scal
 - Heritage and conservation zone context if applicable
 - Typical permit timeline and process
 - Source and date for each piece of information
+- Keep formal planning terminology where useful (e.g. permitted development, conservation area, heritage review, planning permission, building permit), but define it briefly in simple words.
+- Do not repeat the Key takeaway wording. This mode is for the evidence behind the regulatory stance.
+- Do not give the full design recipe; only state what each rule controls architecturally.
 
 **Visualization:** Regulatory requirements checklist
 - Itemised list of requirements with status: Required / Recommended / Not applicable
@@ -106,6 +117,9 @@ Regulatory constraints are a **location and building type** level analysis. Scal
 - One headline: overall regulatory environment rating for the location
 - The two or three most important regulatory facts the architect needs to know
 - Any critical restrictions that would significantly affect design
+- Use formal, professional, non-expert language.
+- Lead with the design consequence: what the architect should or should not assume before committing to BIPV.
+- Include only the most important rule or threshold. Do not list every source, permit step, or document.
 
 **Visualization:** Summary card
 - Overall rating (Permissive / Moderate / Restrictive)
@@ -121,6 +135,9 @@ Regulatory constraints are a **location and building type** level analysis. Scal
 - If mandatory requirements exist: flag minimum BIPV coverage required and how that affects design
 - If permit required: flag timeline and documentation needed
 - Links to Infrastructure Readiness skill for grid connection context
+- Focus on actions: surface choice, module appearance, reflectivity/colour, mounting depth, visibility from public realm, planning documentation, and submission timing.
+- Use only the minimum regulatory values needed to justify each action.
+- Do not re-explain every rule from Explain the numbers.
 
 **Visualization:** Regulatory impact diagram
 - Shows which surfaces are affected by which regulations
