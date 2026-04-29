@@ -2469,24 +2469,46 @@ def compute_basic_economic_project_screen(cea_data, selected_buildings=None):
 
 
 def compute_pv_coverage_scenario_values(cea_data, selected_buildings=None, coverage_pct=100):
-    """Local what-if calculation for scaling the simulated active PV area."""
+    """Local what-if calculation: roof PV stays fixed, facade PV scales with the slider."""
     scope = _pv_scope_for_metrics(cea_data, selected_buildings)
     if not scope:
         return None
 
     fraction = max(0, min(float(coverage_pct), 100)) / 100
-    base_pv = scope["annual_kwh"]
-    scenario_pv = base_pv * fraction
-    roof_area = scope["roof_area_m2"] * fraction
-    facade_area = scope["facade_area_m2"] * fraction
-    active_area = scope["area_m2"] * fraction
-
     files = cea_data.get("files", {})
+
+    roof_gen = 0.0
+    facade_gen = 0.0
+    roof_area_base = scope["roof_area_m2"]
+    facade_area_base = scope["facade_area_m2"]
+    pv_fname = next((k for k in files if k.startswith("PV_PV") and k.endswith("_total.csv") and "buildings" not in k), None)
+    pv_buildings = files.get(pv_fname.replace("_total.csv", "_total_buildings.csv")) if pv_fname else None
+    if pv_buildings is not None and not pv_buildings.empty:
+        df_use = pv_buildings.copy()
+        name_col = _find_metric_col(df_use, "name", "building")
+        if selected_buildings and name_col:
+            df_use = df_use[df_use[name_col].isin(selected_buildings)]
+        roof_e_col = _find_metric_col(df_use, "PV_roofs_top_E_kWh")
+        if roof_e_col:
+            roof_gen = float(pd.to_numeric(df_use[roof_e_col], errors="coerce").fillna(0).sum())
+        for direction in ["south", "east", "west", "north"]:
+            col = _find_metric_col(df_use, f"PV_walls_{direction}_E_kWh")
+            if col:
+                facade_gen += float(pd.to_numeric(df_use[col], errors="coerce").fillna(0).sum())
+
+    if roof_gen <= 0 and facade_gen <= 0:
+        roof_gen = scope["annual_kwh"]
+
+    base_pv = roof_gen + facade_gen
+    scenario_pv = roof_gen + facade_gen * fraction
+    roof_area = roof_area_base
+    facade_area = facade_area_base * fraction
+    active_area = roof_area + facade_area
+
     demand_hourly, demand_source = _sum_hourly_demand_series(files, selected_buildings)
     annual_demand = float(demand_hourly.sum()) if demand_hourly is not None else None
 
     self_consumed = export = self_sufficiency = annual_coverage = None
-    pv_fname = next((k for k in files if k.startswith("PV_PV") and k.endswith("_total.csv") and "buildings" not in k), None)
     if pv_fname and demand_hourly is not None and len(demand_hourly) > 0:
         pv_df = files.get(pv_fname)
         gen_col = _find_metric_col(pv_df, "E_PV_gen", "E_PV", "gen") if pv_df is not None else None
@@ -2536,9 +2558,12 @@ def compute_pv_coverage_scenario_values(cea_data, selected_buildings=None, cover
         "coverage_pct": coverage_pct,
         "base_pv_kwh": base_pv,
         "scenario_pv_kwh": scenario_pv,
+        "roof_pv_kwh": roof_gen,
+        "facade_pv_kwh_at_100pct": facade_gen,
         "active_area_m2": active_area,
         "roof_area_m2": roof_area,
         "facade_area_m2": facade_area,
+        "facade_area_100pct_m2": facade_area_base,
         "annual_demand_kwh": annual_demand,
         "self_consumed_kwh": self_consumed,
         "export_kwh": export,
@@ -2557,8 +2582,9 @@ def format_pv_coverage_scenario_for_recipe(values):
     if not values:
         return "No PV coverage scenario has been saved."
     return (
-        f"Saved PV Coverage Scenario: {values['coverage_pct']:.0f}% of the CEA simulated active PV module area; "
-        f"active PV area {_format_number(values['active_area_m2'], ' m2', 1)}; "
+        f"Saved PV Coverage Scenario: roof PV kept at 100%; facade PV set to {values['coverage_pct']:.0f}% of the CEA simulated facade PV area; "
+        f"active PV area {_format_number(values['active_area_m2'], ' m2', 1)} "
+        f"(roof {_format_number(values['roof_area_m2'], ' m2', 1)}; facade {_format_number(values['facade_area_m2'], ' m2', 1)}); "
         f"annual PV generation {_format_number(values['scenario_pv_kwh'], ' kWh/year')}; "
         f"self-sufficiency {_format_number(values['self_sufficiency_pct'], '%', 1)}; "
         f"annual PV coverage before timing losses {_format_number(values['annual_coverage_pct'], '%', 1)}; "
@@ -2570,9 +2596,11 @@ def format_pv_coverage_scenario_for_recipe(values):
 
 
 def render_pv_coverage_scenario_tool(cea_data, selected_buildings=None):
+    if st.session_state.get("pv_coverage_scenario"):
+        st.info("A PV coverage scenario is saved for the Design Integration Recipe. You can adjust the slider and save again to replace it.")
     current = st.session_state.get("pv_coverage_pct", 50)
     coverage = st.slider(
-        "How much of the recommended active PV area are you willing to cover?",
+        "How much of the recommended facade PV area are you willing to cover?",
         min_value=0,
         max_value=100,
         value=int(current),
@@ -2585,26 +2613,31 @@ def render_pv_coverage_scenario_tool(cea_data, selected_buildings=None):
         st.warning("No PV result is available for this scenario.")
         return
 
-    active_cells = round(coverage / 100 * 24)
+    total_opaque_cells = 19
+    active_cells = round(coverage / 100 * total_opaque_cells)
     cells = []
+    opaque_seen = 0
     for i in range(24):
         row = i // 6
         col = i % 6
-        is_window = row in (1, 2) and col in (1, 4)
-        pv = (23 - i) < active_cells and not is_window
+        is_window = (row in (1, 2) and col in (1, 4)) or (row == 2 and col == 2)
+        if not is_window:
+            opaque_seen += 1
+        pv = not is_window and opaque_seen <= active_cells
         cls = "pv-cell" if pv else ("window-cell" if is_window else "wall-cell")
         cells.append(f'<div class="{cls}"></div>')
 
     html_block = f"""
     <style>
-      .scenario-wrap {{ display:grid; grid-template-columns: 1fr 1fr; gap:22px; align-items:center; margin-top:12px; }}
-      .scenario-building {{ background:#f7f7f5; border:1px solid #ded9cf; border-radius:8px; padding:22px; min-height:310px; display:flex; align-items:center; justify-content:center; }}
-      .building-face {{ width:260px; height:230px; background:#b8bbc0; border:2px solid #8d9095; box-shadow:18px 16px 0 #9fa3a8; display:grid; grid-template-columns:repeat(6, 1fr); grid-template-rows:repeat(4, 1fr); gap:8px; padding:14px; transform:skewY(-4deg); }}
+      * {{ font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; box-sizing:border-box; }}
+      .scenario-wrap {{ display:grid; grid-template-columns: 1fr 1fr; gap:22px; align-items:center; margin-top:12px; background:white; }}
+      .scenario-building {{ background:white; border:1px solid #e0dcd4; border-radius:8px; padding:22px; min-height:310px; display:flex; align-items:center; justify-content:center; }}
+      .building-face {{ width:270px; height:235px; background:#b8bbc0; border:2px solid #8d9095; display:grid; grid-template-columns:repeat(6, 1fr); grid-template-rows:repeat(4, 1fr); gap:8px; padding:14px; }}
       .wall-cell {{ background:#aeb2b7; border:1px solid rgba(0,0,0,.08); }}
       .window-cell {{ background:#dfe8ee; border:1px solid #f5f8fa; }}
       .pv-cell {{ background:#c8a96e; border:1px solid #9b7b3e; }}
       .scenario-metrics {{ display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; }}
-      .metric-box {{ border:1px solid #e0dcd4; border-radius:8px; padding:12px; background:#fffdfa; }}
+      .metric-box {{ border:1px solid #e0dcd4; border-radius:8px; padding:12px; background:white; }}
       .metric-label {{ color:#777d8c; font-size:12px; margin-bottom:4px; }}
       .metric-value {{ font-weight:600; color:#2d3142; font-size:17px; }}
     </style>
@@ -2621,7 +2654,7 @@ def render_pv_coverage_scenario_tool(cea_data, selected_buildings=None):
     </div>
     """
     components.html(html_block, height=390)
-    st.caption("The slider scales the CEA simulated active PV module area. It does not assume the whole physical facade or roof is coverable.")
+    st.caption("The roof PV remains at 100% of the CEA simulated roof PV area. The slider only scales the CEA simulated facade PV area; it does not assume the whole physical facade is coverable.")
 
     if st.button("Save this scenario for Design Integration Recipe", type="primary"):
         st.session_state.pv_coverage_scenario = values
@@ -2637,7 +2670,9 @@ def render_pv_coverage_scenario_tool(cea_data, selected_buildings=None):
             "selected_buildings": selected_buildings or [],
             "response": format_pv_coverage_scenario_for_recipe(values),
         })
-        st.success("Saved. The Design Integration Recipe will use this coverage scenario.")
+        st.session_state.analysis_ran = False
+        st.session_state.chat_history = []
+        st.rerun()
 
 
 def compute_contextual_feasibility_metrics(skill_id, cea_data, selected_buildings=None, scale="District"):
@@ -2752,7 +2787,7 @@ def compute_compact_metrics(skill_id, cea_data, selected_buildings=None, scale="
     return None
 
 
-def _shorten_for_recipe(text, limit=1200):
+def _shorten_for_recipe(text, limit=450):
     if not text:
         return ""
     compact = re.sub(r"\s+", " ", str(text)).strip()
@@ -2765,7 +2800,7 @@ def get_prior_analysis_context_for_recipe(current_skill_id=None):
         return "No prior analysis outputs have been run in this project session yet."
 
     rows = []
-    for item in log[-10:]:
+    for item in log[-6:]:
         if item.get("skill_id") == current_skill_id:
             continue
         label = item.get("skill_name") or item.get("skill_id") or "Analysis"
@@ -2773,7 +2808,7 @@ def get_prior_analysis_context_for_recipe(current_skill_id=None):
         scale = item.get("scale") or "scale not set"
         buildings = item.get("selected_buildings") or []
         building_text = f"; buildings: {', '.join(buildings)}" if buildings else ""
-        response = _shorten_for_recipe(item.get("response", ""), 1100)
+        response = _shorten_for_recipe(item.get("response", ""), 360)
         rows.append(f"- {label} ({mode}, {scale}{building_text}): {response}")
 
     if not rows:
@@ -2798,10 +2833,7 @@ def compute_design_integration_recipe_metrics(cea_data, selected_buildings=None,
         ("Energy generation", compute_energy_generation_metrics),
         ("Self-sufficiency", compute_self_sufficiency_metrics),
         ("Panel type trade-off", lambda data, buildings, _scale: compute_panel_tradeoff_metrics(data, buildings)),
-        ("Carbon footprint", compute_carbon_footprint_metrics),
-        ("Carbon payback", compute_carbon_payback_metrics),
         ("Economic viability", compute_economic_viability_metrics),
-        ("Basic economic signal", lambda data, buildings, _scale: compute_basic_economic_project_screen(data, buildings)),
     ]
     for label, fn in metric_builders:
         try:
@@ -2809,7 +2841,7 @@ def compute_design_integration_recipe_metrics(cea_data, selected_buildings=None,
         except Exception:
             value = None
         if value:
-            sections.append(f"\n{label} facts:\n{_shorten_for_recipe(value, 1600)}")
+            sections.append(f"\n{label} facts:\n{_shorten_for_recipe(value, 520)}")
 
     saved_scenario = st.session_state.get("pv_coverage_scenario")
     if saved_scenario:
