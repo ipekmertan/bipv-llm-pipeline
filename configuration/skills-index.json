@@ -191,6 +191,17 @@
       "status": "complete"
     },
     {
+      "id": "optimize-my-design--pv-coverage-scenario",
+      "display_name": "PV Coverage Scenario",
+      "position_in_tree": [
+        "Optimize My Design",
+        "PV Coverage Scenario"
+      ],
+      "tooltip": "How do cost, carbon, and self-sufficiency change if I cover 0-100% of the recommended facade PV area?",
+      "data_source": "CEA + local calculation",
+      "status": "draft"
+    },
+    {
       "id": "optimize-my-design--design-integration-recipe",
       "display_name": "Design Integration Recipe",
       "position_in_tree": [
@@ -200,17 +211,7 @@
       "tooltip": "What is the full BIPV design recipe based on the analyses already run for this project?",
       "data_source": "Prior analyses + CEA",
       "status": "draft"
-    },
-    {
-      "id": "optimize-my-design--pv-coverage-scenario",
-      "display_name": "PV Coverage Scenario",
-      "position_in_tree": [
-        "Optimize My Design",
-        "PV Coverage Scenario"
-      ],
-      "tooltip": "How do cost, carbon, and self-sufficiency change if I cover 0-100% of the recommended PV area?",
-      "data_source": "CEA + local calculation",
-      "status": "draft"
     }
   ]
 }
+
