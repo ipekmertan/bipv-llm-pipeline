@@ -129,7 +129,7 @@ If multiple panel types were simulated, the skill calculates payback period for 
 - If payback > project lifetime: flag that the carbon argument is weak — other arguments (energy independence, economics) should lead
 - Panel type recommendation based on carbon payback
 - Note on grid decarbonisation: if the grid is getting cleaner over time, the carbon argument for BIPV weakens — best to install now when the grid is still relatively carbon-intensive
-- Links to Operational Carbon Footprint for annual emissions context
+- Links to Carbon Footprint for annual emissions context
 - Links to LCOE for economic comparison
 
 **Visualization:** Lifetime net carbon benefit chart
@@ -155,3 +155,4 @@ If multiple panel types were simulated, the skill calculates payback period for 
 - IDP 2024 Team 2: lifetime LCA analysis comparing embodied vs operational emissions across scenarios
 - Interview — Interviewee B: calculated abated emissions manually — noted this was missing from CEA outputs
 - Interview — Interviewee C: questioned whether BIPV was worth it in Shanghai context — carbon payback provides the evidence-based answer
+
