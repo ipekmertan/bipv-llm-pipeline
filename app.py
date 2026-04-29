@@ -1295,6 +1295,108 @@ def compute_infrastructure_readiness_metrics(cea_data, selected_buildings=None, 
         concept_design_move = "design PV zones in phases and keep enough service space for storage, power electronics, and utility-side requirements."
         design_allowances = "larger inverter/electrical room, battery or thermal-storage-ready area, clear cable/riser routes, switchgear/metering space, and future curtailment or staged-connection flexibility"
 
+    pv_buildings_for_staging = None
+    if pv_fname:
+        pv_buildings_for_staging = files.get(pv_fname.replace("_total.csv", "_total_buildings.csv"))
+        if pv_buildings_for_staging is not None:
+            pv_stage_name_col = _find_metric_col(pv_buildings_for_staging, "name", "building")
+            if selected_buildings and pv_stage_name_col:
+                pv_buildings_for_staging = pv_buildings_for_staging[
+                    pv_buildings_for_staging[pv_stage_name_col].isin(selected_buildings)
+                ].copy()
+
+    surface_stage_candidates = []
+    surface_columns = [
+        ("Roof", ["PV_roofs_top_E_kWh", "PV_roofs_top_m2"], "lowest visual constraint; usually first priority if access and roof program allow it"),
+        ("South facade", ["PV_walls_south_E_kWh", "PV_walls_south_m2"], "strong facade candidate; useful as visible architectural BIPV if WWR/opaque area allows it"),
+        ("East facade", ["PV_walls_east_E_kWh", "PV_walls_east_m2"], "morning generation; useful when morning loads or east visibility matter"),
+        ("West facade", ["PV_walls_west_E_kWh", "PV_walls_west_m2"], "afternoon generation; useful for cooling or late-day loads"),
+        ("North facade", ["PV_walls_north_E_kWh", "PV_walls_north_m2"], "usually lower priority unless data shows meaningful yield or design integration value"),
+    ]
+    if pv_buildings_for_staging is not None and not pv_buildings_for_staging.empty:
+        for surface, cols, note in surface_columns:
+            gen_col = next((c for c in cols if c in pv_buildings_for_staging.columns and c.endswith("_E_kWh")), None)
+            area_col = next((c for c in cols if c in pv_buildings_for_staging.columns and c.endswith("_m2")), None)
+            gen = float(pd.to_numeric(pv_buildings_for_staging[gen_col], errors="coerce").sum()) if gen_col else 0.0
+            area = float(pd.to_numeric(pv_buildings_for_staging[area_col], errors="coerce").sum()) if area_col else None
+            if gen > 0 or (area is not None and area > 0):
+                surface_stage_candidates.append({
+                    "surface": surface,
+                    "generation": gen,
+                    "area": area,
+                    "yield_m2": gen / area if area and area > 0 else None,
+                    "note": note,
+                })
+    surface_stage_candidates = sorted(
+        surface_stage_candidates,
+        key=lambda row: (row["generation"], row["yield_m2"] or 0),
+        reverse=True
+    )
+
+    staging_recommended = (
+        pv_to_demand_peak is None
+        or pv_to_demand_peak >= 0.5
+        or (transformer_ratio is not None and transformer_ratio >= 0.25)
+    )
+
+    stage_lines = []
+    if not staging_recommended:
+        stage_lines.append(
+            "- Staged facade PV is not required by the current CEA infrastructure screen. "
+            "The PV peak is low enough relative to demand/indicative transformer capacity that the concept can keep the best PV surfaces active from day one, while still leaving normal spare riser capacity for future expansion."
+        )
+    elif surface_stage_candidates:
+        stage_1 = surface_stage_candidates[:1]
+        stage_2 = surface_stage_candidates[1:3]
+        stage_3 = surface_stage_candidates[3:]
+
+        def stage_text(title, rows, purpose):
+            if not rows:
+                return None
+            bits = []
+            for row in rows:
+                bits.append(
+                    f"{row['surface']} ({_format_number(row['generation'], ' kWh/year')}; "
+                    f"area {_format_number(row['area'], ' m2', 1)}; "
+                    f"yield {_format_number(row['yield_m2'], ' kWh/m2/year', 1)})"
+                )
+            return f"- {title}: {', '.join(bits)}. {purpose}"
+
+        stage_lines.append(stage_text("Stage 1 / must-keep PV zone", stage_1, "Connect this first because it gives the strongest simulated PV contribution."))
+        stage_lines.append(stage_text("Stage 2 / expansion PV zone", stage_2, "Keep these zones PV-ready and connect if export capacity, budget, and facade design allow it."))
+        stage_lines.append(stage_text("Stage 3 / optional or cladding-compatible zone", stage_3, "Use as future PV, inactive PV-ready cladding, or visually compatible non-PV cladding if grid/export constraints are tight."))
+        stage_lines = [line for line in stage_lines if line]
+    else:
+        stage_lines.append("- Staged PV is recommended, but surface-specific PV staging cannot be calculated because PV surface generation/area columns were not found. Use the irradiation and envelope-suitability outputs to rank roof and facade zones.")
+
+    if peak_pv_kw is None:
+        inverter_room_m2 = None
+    elif peak_pv_kw <= 30:
+        inverter_room_m2 = 4
+    elif peak_pv_kw <= 100:
+        inverter_room_m2 = 6
+    elif peak_pv_kw <= 250:
+        inverter_room_m2 = 10
+    elif peak_pv_kw <= 500:
+        inverter_room_m2 = 16
+    else:
+        inverter_room_m2 = max(20, math.ceil(peak_pv_kw / 25))
+
+    if pv_to_demand_peak is None or pv_to_demand_peak < 0.5:
+        battery_ready_m2 = 0
+        battery_ready_note = "battery-ready space is optional at concept stage unless the design intentionally adds resilience or load shifting"
+    elif pv_to_demand_peak <= 1.0:
+        battery_ready_m2 = max(4, round((peak_pv_kw or 0) / 40))
+        battery_ready_note = "reserve a small battery/load-shifting-ready zone because sunny low-load hours may create export pressure"
+    else:
+        battery_ready_m2 = max(8, round((peak_pv_kw or 0) / 25))
+        battery_ready_note = "reserve a larger storage-ready zone because export constraints could affect how much PV can operate at peak"
+
+    service_location_note = (
+        "Place the inverter/electrical room next to the main vertical riser between the largest PV zone and the grid/metering room. "
+        "For roof-led PV, upper-floor or roof-adjacent plant space reduces DC routing; for facade-led PV, align the riser with the dominant PV elevation and keep maintenance access separated from occupied facade zones."
+    )
+
     grid_df = files.get("GRID.csv")
     grid_carbon = buy_price = sell_price = None
     if grid_df is not None:
@@ -1359,6 +1461,21 @@ def compute_infrastructure_readiness_metrics(cea_data, selected_buildings=None, 
     lines.append("- Transformer screening is only an early warning; it controls how strongly the design should reserve switchgear/metering/export-connection space before utility data is known.")
     lines.append("- Cable length is not defined by CEA. Do not invent a maximum cable length. Instead, translate it as an architectural requirement: place inverter/electrical rooms within the project-specific allowed route distance from roof/facade PV zones once the electrical design limit is known.")
     lines.append("- The architect controls room location, riser alignment, PV zoning, staged expansion space, maintenance access, and whether storage-ready space is possible.")
+    lines.append("Specific concept-stage PV staging guidance from simulated surface PV results:")
+    if staging_recommended:
+        lines.append("- Meaning of staging: do not design the facade so every PV panel must be installed and connected on day one. Divide BIPV into phases or zones, so the building can keep a coherent facade while the active PV area can respond to export capacity, budget, and utility approval.")
+        lines.append("- Stage logic: Stage 1 is the must-keep active PV zone; Stage 2 is PV-ready expansion if grid/export and budget allow; Stage 3 is optional PV-ready cladding or visually compatible non-PV cladding if constraints are tight.")
+    lines.extend(stage_lines)
+    lines.append("Specific concept-stage equipment-space allowance:")
+    lines.append(
+        f"- Inverter/electrical room: reserve about {_format_number(inverter_room_m2, ' m2', 0)} "
+        "as an early placeholder for PV inverter/electrical equipment. This is a concept allowance, not final electrical design."
+    )
+    lines.append(
+        f"- Battery/load-shifting-ready area: reserve about {_format_number(battery_ready_m2, ' m2', 0)}. "
+        f"{battery_ready_note}."
+    )
+    lines.append(f"- Preferred location: {service_location_note}")
 
     if grid_carbon is not None or buy_price is not None or sell_price is not None:
         lines.append("Grid assumptions from GRID.csv:")
@@ -1943,28 +2060,36 @@ def build_system_prompt(skill_md, cea_summary, output_mode, scale, selected_buil
     mode_instructions = {
         "Key takeaway": """OUTPUT MODE: Key takeaway
 Answer the core question of this analysis in the simplest, most understandable way possible.
+This mode must stand alone, but it should NOT repeat the full numeric breakdown or detailed design recipe from the other modes.
 - 2-3 bullet points maximum.
-- Lead with the single most important finding and its number.
-- Explain in plain language what that number means — no jargon without explanation.
-- End with one concrete "For BIPV," action with a real number.
-- No methodology, no context, no benchmarks — just the answer.""",
+- Use formal, professional, non-expert language. Avoid specialist terminology unless it is necessary.
+- Lead with the design decision and priority order.
+- Include only the one or two most important numbers that support the decision.
+- Explain in plain language what the number means for the architect.
+- End with one concrete "For BIPV," action with a real number or spatial allowance where available.
+- No methodology, no full evidence list, no detailed staging recipe, no benchmarks — just the decision and priorities.""",
 
         "Explain the numbers": """OUTPUT MODE: Explain the numbers
-The full analytical breakdown. Cover all of the following:
+The evidence and terminology layer. This mode must stand alone, but it should NOT repeat the concise decision wording from Key takeaway or the full action recipe from Design implication.
+Cover all of the following:
 - What each key number is and where it comes from.
 - What it means in context — compare to benchmarks, thresholds, or industry norms where relevant.
 - How the numbers relate to each other (e.g. generation vs demand, embodied vs operational carbon).
+- Keep the correct technical terminology (e.g. peak demand, PV peak, export pressure, transformer screening, self-consumption, annual coverage), but define each term in simple words the first time it appears.
 - Use bullet points, one point per number or comparison.
 - Include the actual values — do not be vague.
+- Keep design recommendations brief: only state what each number controls architecturally, not the full design recipe.
 - This mode is paired with charts generated by the app — do not describe charts, but you may reference what the architect should look for in them.""",
 
         "Design implication": """OUTPUT MODE: Design implication
-A practical recipe for the architect based on the results. No charts.
+A practical recipe for the architect based on the results. This mode must stand alone, but it should NOT re-explain every number from Explain the numbers.
+No charts.
 - 3-5 bullet points, each a specific, actionable design suggestion.
 - Every bullet must follow directly from the data — no generic advice.
 - Include numbers where they sharpen the recommendation (e.g. area, ratio, orientation).
 - Frame each point as: what to do, and why the data supports it.
-- Do not explain what the numbers are — assume the architect has already read them."""
+- Focus on actions, spatial allowances, phasing, placement, and design options.
+- Do not explain what the numbers are — use only the minimum number needed to justify the action."""
     }
 
     mode_block = mode_instructions.get(output_mode, f"Output mode: {output_mode}")
