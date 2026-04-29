@@ -1198,6 +1198,22 @@ def compute_infrastructure_readiness_metrics(cea_data, selected_buildings=None, 
                      and "buildings" not in k), None)
     pv_df = files.get(pv_fname) if pv_fname else None
     pv_col = _find_metric_col(pv_df, "E_PV_gen", "E_PV", "gen") if pv_df is not None else None
+    pv_source = pv_fname or "no PV total file"
+    pv_peak_note = "from hourly PV total file"
+
+    selected_annual_pv_kwh = None
+    if selected_buildings and pv_fname:
+        pv_buildings_fname = pv_fname.replace("_total.csv", "_total_buildings.csv")
+        pv_buildings_df = files.get(pv_buildings_fname)
+        if pv_buildings_df is not None:
+            pv_b_name_col = _find_metric_col(pv_buildings_df, "name", "building")
+            pv_b_col = _find_metric_col(pv_buildings_df, "E_PV_gen", "E_PV", "gen")
+            if pv_b_name_col and pv_b_col:
+                selected_pv_buildings = pv_buildings_df[pv_buildings_df[pv_b_name_col].isin(selected_buildings)]
+                if not selected_pv_buildings.empty:
+                    selected_annual_pv_kwh = float(selected_pv_buildings[pv_b_col].sum())
+                    pv_source = f"{pv_fname} scaled to selected buildings using {pv_buildings_fname}"
+                    pv_peak_note = "estimated by scaling district hourly PV profile to selected annual PV generation"
 
     demand_df = files.get("Total_demand_hourly.csv")
     demand_source = "Total_demand_hourly.csv"
@@ -1212,13 +1228,27 @@ def compute_infrastructure_readiness_metrics(cea_data, selected_buildings=None, 
             demand_source = "selected building hourly demand files"
     demand_col = _find_metric_col(demand_df, "E_sys_kWh", "GRID", "E_tot") if demand_df is not None else None
 
-    peak_pv_kw = float(pv_df[pv_col].max()) if pv_df is not None and pv_col else None
-    annual_pv_kwh = float(pv_df[pv_col].sum()) if pv_df is not None and pv_col else None
+    district_annual_pv_kwh = float(pv_df[pv_col].sum()) if pv_df is not None and pv_col else None
+    if selected_annual_pv_kwh is not None and district_annual_pv_kwh and district_annual_pv_kwh > 0:
+        pv_scale = selected_annual_pv_kwh / district_annual_pv_kwh
+        peak_pv_kw = float(pv_df[pv_col].max()) * pv_scale if pv_df is not None and pv_col else None
+        annual_pv_kwh = selected_annual_pv_kwh
+    else:
+        peak_pv_kw = float(pv_df[pv_col].max()) if pv_df is not None and pv_col else None
+        annual_pv_kwh = district_annual_pv_kwh
     peak_demand_kw = float(demand_df[demand_col].max()) if demand_df is not None and demand_col else None
     annual_demand_kwh = float(demand_df[demand_col].sum()) if demand_df is not None and demand_col else None
 
     pv_to_demand_peak = (peak_pv_kw / peak_demand_kw) if peak_pv_kw is not None and peak_demand_kw and peak_demand_kw > 0 else None
     pv_to_demand_annual = (annual_pv_kwh / annual_demand_kwh) if annual_pv_kwh is not None and annual_demand_kwh and annual_demand_kwh > 0 else None
+    if pv_to_demand_peak is None:
+        export_pressure = "unknown"
+    elif pv_to_demand_peak < 0.5:
+        export_pressure = "low: PV peak is below half of peak electricity demand"
+    elif pv_to_demand_peak <= 1.0:
+        export_pressure = "moderate: PV peak is below peak electricity demand, but export may occur during low-load sunny hours"
+    else:
+        export_pressure = "high: PV peak exceeds peak electricity demand, so self-consumption and export constraints matter"
 
     transformer_assumption_kva = 630
     transformer_ratio = peak_pv_kw / transformer_assumption_kva if peak_pv_kw is not None else None
@@ -1260,18 +1290,24 @@ def compute_infrastructure_readiness_metrics(cea_data, selected_buildings=None, 
     dc_present = bool(thermal_files and any("/DC/" in f or f.startswith("DC/") for f in thermal_files))
 
     lines = [
-        f"Sources: {pv_fname or 'no PV total file'}; {demand_source if demand_df is not None else 'no hourly demand file'}; GRID.csv {'available' if grid_df is not None else 'not available'}; supply.csv {'available' if supply_df is not None else 'not available'}.",
+        f"Sources: {pv_source}; {demand_source if demand_df is not None else 'no hourly demand file'}; GRID.csv {'available' if grid_df is not None else 'not available'}; supply.csv {'available' if supply_df is not None else 'not available'}.",
         f"Scale: {scale}",
         f"Project-side infrastructure pressure from CEA screening: {readiness}.",
         "Full infrastructure readiness cannot be confirmed from CEA alone. Local transformer capacity, grid export caps, permitting timelines, net metering, feed-in tariffs, and utility approval rules require external web/utility data.",
         "Grid/export screening:",
     ]
-    lines.append(f"- Peak PV generation: {_format_number(peak_pv_kw, ' kW', 1)}.")
+    lines.append(f"- Peak PV generation: {_format_number(peak_pv_kw, ' kW', 1)} ({pv_peak_note}).")
     lines.append(f"- Annual PV generation: {_format_number(annual_pv_kwh, ' kWh/year')}.")
     lines.append(f"- Peak electricity demand: {_format_number(peak_demand_kw, ' kW', 1)}.")
     lines.append(f"- Annual electricity demand: {_format_number(annual_demand_kwh, ' kWh/year')}.")
-    lines.append(f"- PV peak / demand peak: {_format_number(pv_to_demand_peak * 100 if pv_to_demand_peak is not None else None, '%', 1)}.")
-    lines.append(f"- PV annual generation / annual demand: {_format_number(pv_to_demand_annual * 100 if pv_to_demand_annual is not None else None, '%', 1)}.")
+    lines.append(
+        f"- Export-pressure screen: {export_pressure}. "
+        f"Estimated PV peak is {_format_number(pv_to_demand_peak * 100 if pv_to_demand_peak is not None else None, '%', 1)} of peak demand."
+    )
+    lines.append(
+        f"- Annual coverage screen: PV generation is {_format_number(pv_to_demand_annual * 100 if pv_to_demand_annual is not None else None, '%', 1)} "
+        "of annual electricity demand."
+    )
     lines.append(
         f"- Transformer screening: peak PV is {_format_number(transformer_ratio * 100 if transformer_ratio is not None else None, '%', 1)} "
         f"of an indicative {transformer_assumption_kva} kVA neighbourhood transformer. Replace this assumption with actual utility data when available."
