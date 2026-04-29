@@ -149,6 +149,14 @@ Important:
 
 ## Output Expectations
 
+The three output modes must complement each other:
+
+- **Key takeaway** = decision and priorities.
+- **Explain the numbers** = evidence, terminology, and interpretation of the values.
+- **Design implication** = action recipe, spatial allowances, placement, and options.
+
+Each mode must be understandable on its own, but it should not repeat the full content of the other two modes.
+
 **Key takeaway**
 - Start with the concept-phase infrastructure stance and whether it is provisional.
 - State the design consequence in plain architectural language.
@@ -160,6 +168,8 @@ Important:
 - If mentioning stages, first define what staging means in one sentence.
 - If staging is not recommended by the computed metrics, replace the staging priority with the highest-value active PV surface and basic spare riser capacity.
 - Do not lead with a raw PV/demand ratio. Translate it first into what the architect should do early in design.
+- Do not list the full numeric evidence. Use only the one or two values needed to support the priority.
+- Do not give the full design recipe; leave detailed placement/specification to Design implication.
 - Keep this mode short and decision-oriented.
 - Mention exact transformer capacity, export cap, tariff, or utility rule only if it is actually supplied. If not supplied, focus the main answer on priorities and add a one-line precision note only if useful.
 
@@ -176,6 +186,8 @@ Important:
 - Explain supply-system compatibility: what BIPV electricity can and cannot offset.
 - If sourced public grid information is supplied, explain how it changes the interpretation of the CEA numbers. If an exact value is missing, place that in a short "to make this precise" note after the answer, with the responsible contact and exact question.
 - If mentioning cable routes, explain them through design control: room/riser placement within an allowed route distance, not vague "short cable length."
+- Do not repeat the full Key takeaway wording.
+- Do not give the full action recipe; keep design comments to what each number controls.
 
 **Design implication**
 - Give a practical concept strategy.
@@ -190,6 +202,7 @@ Important:
 - Give the approximate service-room and storage-ready square metres from the computed metrics, and say where to place them relative to the dominant PV surface and grid/metering point.
 - Where useful, write the answer as "Reserve / Avoid / Keep flexible / Verify later" so it is easy to act on during concept design.
 - When giving measurable advice, use only project-derived numbers or explicitly label missing values as "to be confirmed." Do not make up cable distances, transformer capacity, room area, or storage size.
+- Do not re-explain every number from Explain the numbers. Use only the minimum values needed to justify each action.
 
 ---
 
