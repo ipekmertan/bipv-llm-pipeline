@@ -108,15 +108,16 @@ CdTe (PV3) consistently offers the best balance of efficiency, cost, and embodie
 
 ### If "Explain the numbers" selected:
 **What the LLM produces:**
-- Table comparing all four panel types across: efficiency, actual yield, cost, embodied carbon, LCOE, carbon payback period
+- A compact table comparing all simulated panel types. Columns must include: panel type, technology name, annual generation (kWh/year), installed area (m²), yield (kWh/m²/year), efficiency (%), embodied carbon (kgCO2/m²), roof cost (€/m²), facade cost (€/m²).
 - Plain-language explanation of what each metric means
 - Which panel type leads on each individual metric
 - Note that actual yield reflects real simulation conditions — not theoretical maximum
+- Keep this mode easy on the eyes: use one table first, then at most three short bullets explaining the main trade-offs.
 
-**Visualization:** Multi-criteria comparison radar chart
-- One axis per metric: efficiency / yield / cost / embodied carbon / carbon payback
-- One line per panel type
-- Makes trade-offs immediately visible
+**Visualization:** Panel generation comparison
+- Monthly generation line chart with one coloured line per panel type
+- Average daily generation profile with one coloured line per panel type
+- No annual total bar chart; the table already carries annual totals.
 
 ---
 
