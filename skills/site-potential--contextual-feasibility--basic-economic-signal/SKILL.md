@@ -1,6 +1,6 @@
 ---
 name: site-potential--contextual-feasibility--basic-economic-signal
-description: Use when the architect wants to understand the basic economic context for BIPV in their project location before running detailed financial analysis. Uses location from CEA weather file and internet search to retrieve current electricity prices, grid carbon intensity, and market context.
+description: Use when the architect wants to understand the basic economic context for BIPV in their project location before running detailed financial analysis. Uses location from the CEA weather file, app-supplied public research, regional economic baselines, and a project-specific PV value screen.
 intent: Give the architect a quick economic orientation before committing to BIPV — covering local electricity prices, grid carbon intensity, typical BIPV installation costs, and whether the market context makes BIPV economically compelling or marginal in this location.
 type: component
 position_in_tree: "Goal → Site Potential → Contextual Feasibility → Basic Economic Signal"
@@ -16,16 +16,19 @@ This is a **pre-design** skill — it helps the architect understand the economi
 
 ---
 
-## File Source
+## App Integration
 
-This skill reads from the uploaded CEA project zip. The app finds the relevant files automatically by filename — no manual file selection needed.
+This skill runs inside the BIPV Analyst web app, not inside CEA4.
 
-**Location context** is taken from the project's weather file (`.epw`) found inside the zip.
+The user uploads a zipped CEA output scenario. The app finds the relevant files automatically by filename — no manual file selection needed.
+
+Location context is taken from the project's weather file (`.epw`) found inside the zip. The app also supplies a hardcoded regional economic baseline and, when PV and demand results exist, a project-specific early BIPV economic screen.
+
 ## Data Sources
 
-**Primary source: Internet search**
+**Primary source: app-supplied public research and regional baseline**
 
-The LLM performs targeted searches for the project location using the following queries:
+Use only the search results, regional economic context, and computed project screen supplied by the app. The app may search with queries such as:
 - `"[city] electricity price residential commercial [current year]"`
 - `"[country] grid carbon intensity electricity [current year]"`
 - `"[country] BIPV installation cost per m2 [current year]"`
@@ -39,7 +42,17 @@ The LLM performs targeted searches for the project location using the following 
 - Typical simple payback period for solar in this location
 - Whether electricity prices are trending up or down
 
-**Source quality:** The LLM prioritises national energy agency statistics, utility company published tariffs, and reputable energy research organisations. It flags when information may be outdated and provides the source and date.
+**Project-specific screen supplied by the app when available:**
+- Simulated active PV area split into roof and facade area
+- Annual PV generation from CEA
+- Annual electricity demand from selected building demand files
+- Hourly self-consumption estimate from the overlap of scaled hourly PV generation and hourly demand
+- Exported surplus estimate
+- Installed BIPV investment range in local currency, using roof and facade cost/m2 baselines
+- Annual electricity value in local currency
+- Simple payback screen from project data
+
+**Source quality:** Prioritise national energy agency statistics, utility company published tariffs, and reputable energy research organisations. Use the app-supplied hardcoded baseline when public search is missing. Do not invent current prices, tariffs, costs, exchange rates, or payback values.
 
 ---
 
@@ -66,12 +79,12 @@ Basic economic signal is a **location-level** analysis — the same economic con
 
 | Indicator | Strong case | Marginal case | Weak case |
 |-----------|-------------|---------------|-----------|
-| Electricity price | > 0.20 €/kWh | 0.10–0.20 €/kWh | < 0.10 €/kWh |
+| Electricity price | High for local currency/context | Moderate | Low |
 | Grid carbon intensity | > 0.4 kgCO2/kWh | 0.2–0.4 kgCO2/kWh | < 0.2 kgCO2/kWh |
 | Typical payback | < 8 years | 8–15 years | > 15 years |
 | Price trend | Rising | Stable | Falling |
 
-**Context note:** Low electricity prices (like Shanghai at ~0.08 yuan/kWh in 2024) create a weak economic case for BIPV from a pure cost-saving perspective — but a strong carbon case if the grid is carbon-intensive. The LLM always presents both dimensions separately so the architect can make an informed argument for whichever is more relevant to their client.
+**Currency rule:** All user-facing prices, costs, tariffs, and savings must be in the location's currency. If a source is supplied in another currency, convert it before presenting it. Do not show EUR/USD values unless the project currency is EUR/USD or the user explicitly asks for a comparison.
 
 ---
 
@@ -91,6 +104,7 @@ Each mode must be understandable on its own, but it should not repeat the full c
 - Grid carbon intensity with source and date
 - Typical BIPV installation cost range for the market
 - Typical payback period range for the location
+- Project-specific PV area, investment range, annual value, self-consumption, export estimate, and simple payback when supplied by the app
 - Whether electricity prices are trending up or down
 - Keep economic terminology where useful (e.g. electricity tariff, export compensation, simple payback, grid carbon intensity, capital cost), but define it briefly in simple words.
 - Do not repeat the Key takeaway wording. This mode is for the evidence behind the economic signal.
@@ -112,6 +126,7 @@ Each mode must be understandable on its own, but it should not repeat the full c
 - Lead with the client/design argument, not a full list of prices and rates.
 - Include only the one or two most important numbers that support the signal.
 - Do not repeat the full payback/cost/tariff breakdown.
+- When the project-specific screen is available, use it for the one or two supporting numbers instead of ending with a generic consultant note.
 
 **Visualization:** Signal summary card
 - Overall signal (Strong / Marginal / Weak)
@@ -129,6 +144,7 @@ Each mode must be understandable on its own, but it should not repeat the full c
 - Sizing recommendation: in weak economic contexts, recommend right-sizing for self-consumption only rather than export
 - Links to LCOE and Carbon Payback skills for detailed financial and carbon analysis
 - Focus on actions: which argument to lead with, whether to right-size or expand PV, whether to prioritise self-consumption, and how to avoid overpromising savings.
+- If the project-specific screen shows high export or long payback, give architectural actions: reduce first-phase PV to high-yield/self-consumed zones, stage visible facade PV, reserve inverter/electrical space, or frame PV as carbon/regulatory/architectural value rather than pure savings.
 - Use only the minimum economic values needed to justify each action.
 - Do not re-explain every number from Explain the numbers.
 
@@ -143,8 +159,9 @@ Each mode must be understandable on its own, but it should not repeat the full c
 
 - **Electricity prices vary by tariff:** Commercial and residential tariffs differ significantly in most countries. Always retrieve both and flag which applies to the project building type.
 - **Grid carbon intensity changes over time:** As grids decarbonise, the carbon argument for BIPV weakens. Always note the trend direction alongside the current value.
-- **Currency conversion:** Installation costs and electricity prices are in local currency — always note the currency and approximate EUR/USD equivalent for international comparison.
-- **This is not financial advice:** Always include a note that this is an early orientation only and detailed financial analysis should be done by a qualified energy consultant.
+- **Currency conversion:** Installation costs and electricity prices must be presented in the project location's currency. Do not show EUR/USD equivalents unless requested.
+- **Generic consultant endings:** Do not end the main answer with "consult ElCom / utility / cost consultant" if the app supplied a project-specific estimate. Put any missing precision item in one short final note.
+- **This is not financial advice:** Treat this as concept-stage economic screening, not a final investment case.
 
 ---
 
