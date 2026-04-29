@@ -8,11 +8,14 @@ import tempfile
 import pandas as pd
 import struct
 import math
+import re
+import html
 from pathlib import Path
+from urllib.parse import quote_plus, urlparse, parse_qs, unquote
 import requests
 import sys
 sys.path.append(str(Path(__file__).parent / "scripts"))
-from threshold_module import get_threshold_check, THRESHOLD_RELEVANT_SKILLS
+from threshold_module import get_threshold_check, THRESHOLD_RELEVANT_SKILLS, parse_epw_location
 
 # Map each skill to the simulations whose parameters need checking
 SKILL_SIMULATION_MAP = {
@@ -58,11 +61,19 @@ h1, h2, h3 { font-family: 'Inter', serif; }
 
 SKILLS_INDEX_PATH = Path(__file__).parent / "configuration" / "skills-index.json"
 SKILLS_DIR = Path(__file__).parent / "skills"
+INFRASTRUCTURE_CONTEXT_PATH = Path(__file__).parent / "configuration" / "infrastructure_context.json"
 
 @st.cache_data
 def load_skills_index():
     with open(SKILLS_INDEX_PATH) as f:
         return json.load(f)["skills"]
+
+@st.cache_data
+def load_infrastructure_context():
+    if not INFRASTRUCTURE_CONTEXT_PATH.exists():
+        return {}
+    with open(INFRASTRUCTURE_CONTEXT_PATH) as f:
+        return json.load(f)
 
 @st.cache_data(ttl=3600)
 def load_acacia_curves():
@@ -479,9 +490,11 @@ COMPACT_SKILL_TASKS = {
         "and form changes such as stepping, setbacks, orientation, splitting mass, or moving program volume."
     ),
     "site-potential--contextual-feasibility--infrastructure-readiness": (
-        "Use CEA data only as project-side infrastructure pressure: PV peak, demand peak, export pressure, "
-        "grid assumptions, and supply-system compatibility. Full infrastructure readiness requires external "
-        "utility/policy data; if no web-search results are provided, state that the readiness rating is provisional."
+        "Combine CEA project pressure with any supplied public utility/grid context to turn infrastructure "
+        "constraints into early BIPV design choices: PV ambition, staging, self-consumption, electrical-room "
+        "allowance, risers, metering/switchgear space, storage readiness, and thermal-system narrative. "
+        "If precise utility data is missing, keep the main answer useful and add only a short precision note "
+        "saying who to contact and exactly what to ask."
     ),
     "optimize-my-design--panel-type-tradeoff": (
         "Interpret the simulated PV panel type comparison using actual generation, installed area, yield "
@@ -1261,6 +1274,27 @@ def compute_infrastructure_readiness_metrics(cea_data, selected_buildings=None, 
     else:
         readiness = "CONSTRAINED"
 
+    if pv_to_demand_peak is None:
+        concept_stance = "UNKNOWN - the app cannot compare peak PV and peak electricity demand from the extracted files."
+        pv_ambition = "keep PV zones flexible until hourly PV and demand data are available."
+        concept_design_move = "reserve generic electrical routes and avoid locking the facade/roof strategy to an export-heavy concept."
+        design_allowances = "inverter room, vertical risers, accessible roof/facade maintenance zones, and a future battery-ready area if the project later shows export pressure"
+    elif pv_to_demand_peak < 0.5:
+        concept_stance = "MANAGEABLE - the simulated PV peak is lower than half of the selected load peak, so export pressure is not the main early-design concern."
+        pv_ambition = "roof-led or best-surface BIPV can be explored without immediately reducing PV area, while still keeping the grid connection check open."
+        concept_design_move = "prioritise the most useful solar surfaces and keep electrical rooms/routes simple but expandable."
+        design_allowances = "compact inverter/electrical space, short DC cable routes, roof/facade access, and spare riser capacity for later PV expansion"
+    elif pv_to_demand_peak <= 1.0:
+        concept_stance = "SELF-CONSUMPTION-FIRST - PV peak is comparable to the selected load peak, so sunny low-load hours may still create export pressure."
+        pv_ambition = "use the best roof/facade zones, but shape the concept around matching building loads before assuming unrestricted export."
+        concept_design_move = "distribute PV across surfaces/times, reserve space for inverter equipment, and keep a battery-ready or load-shifting option."
+        design_allowances = "inverter room, battery-ready space, vertical risers, meter/export connection allowance, and accessible maintenance routes"
+    else:
+        concept_stance = "EXPORT-SENSITIVE - PV peak exceeds the selected load peak, so the concept should not assume every high-irradiation surface can export freely."
+        pv_ambition = "stage the BIPV area, prioritise self-consumed generation, or pair large PV areas with storage/load-shifting before treating maximum generation as the design target."
+        concept_design_move = "design PV zones in phases and keep enough service space for storage, power electronics, and utility-side requirements."
+        design_allowances = "larger inverter/electrical room, battery or thermal-storage-ready area, clear cable/riser routes, switchgear/metering space, and future curtailment or staged-connection flexibility"
+
     grid_df = files.get("GRID.csv")
     grid_carbon = buy_price = sell_price = None
     if grid_df is not None:
@@ -1292,8 +1326,15 @@ def compute_infrastructure_readiness_metrics(cea_data, selected_buildings=None, 
     lines = [
         f"Sources: {pv_source}; {demand_source if demand_df is not None else 'no hourly demand file'}; GRID.csv {'available' if grid_df is not None else 'not available'}; supply.csv {'available' if supply_df is not None else 'not available'}.",
         f"Scale: {scale}",
-        f"Project-side infrastructure pressure from CEA screening: {readiness}.",
-        "Full infrastructure readiness cannot be confirmed from CEA alone. Local transformer capacity, grid export caps, permitting timelines, net metering, feed-in tariffs, and utility approval rules require external web/utility data.",
+        f"Project-side infrastructure pressure class from CEA screening: {readiness}.",
+        "User-facing rule: the main answer should do the research translation work for the architect. Use CEA for project-side pressure and any supplied public utility/grid facts for context; convert both into early design priorities and selectable options.",
+        "If public utility/grid information is supplied, interpret it for early design decisions: PV staging, self-consumption priority, metering/switchgear space, plant-room allowance, storage readiness, and whether export assumptions should shape facade/roof PV area.",
+        "If exact transformer capacity, export cap, tariffs, or utility approval rules are missing, do not let the main answer become a caveat. Add a short final precision note only when useful: who to contact and exactly what to ask for.",
+        "Concept-phase design guidance:",
+        f"- Concept-phase stance: {concept_stance}",
+        f"- PV ambition: {pv_ambition}",
+        f"- Main design move: {concept_design_move}",
+        f"- Reserve now: {design_allowances}.",
         "Grid/export screening:",
     ]
     lines.append(f"- Peak PV generation: {_format_number(peak_pv_kw, ' kW', 1)} ({pv_peak_note}).")
@@ -1312,6 +1353,12 @@ def compute_infrastructure_readiness_metrics(cea_data, selected_buildings=None, 
         f"- Transformer screening: peak PV is {_format_number(transformer_ratio * 100 if transformer_ratio is not None else None, '%', 1)} "
         f"of an indicative {transformer_assumption_kva} kVA neighbourhood transformer. Replace this assumption with actual utility data when available."
     )
+    lines.append("Architectural control variables for explaining the numbers:")
+    lines.append("- PV peak vs demand peak controls whether the concept can keep maximum PV area, should prioritise self-consumption, or should stage some PV zones until export capacity is confirmed.")
+    lines.append("- Annual PV vs annual demand controls whether the BIPV story is partial load support, near-annual matching, or surplus-generation/export-sensitive.")
+    lines.append("- Transformer screening is only an early warning; it controls how strongly the design should reserve switchgear/metering/export-connection space before utility data is known.")
+    lines.append("- Cable length is not defined by CEA. Do not invent a maximum cable length. Instead, translate it as an architectural requirement: place inverter/electrical rooms within the project-specific allowed route distance from roof/facade PV zones once the electrical design limit is known.")
+    lines.append("- The architect controls room location, riser alignment, PV zoning, staged expansion space, maintenance access, and whether storage-ready space is possible.")
 
     if grid_carbon is not None or buy_price is not None or sell_price is not None:
         lines.append("Grid assumptions from GRID.csv:")
@@ -1342,7 +1389,8 @@ def compute_infrastructure_readiness_metrics(cea_data, selected_buildings=None, 
     lines.append("- If PV peak is large relative to demand peak or assumed transformer capacity, frame readiness as export-constrained and prioritise self-consumption, load shifting, or storage.")
     lines.append("- If heating is boiler/district-heating based, BIPV electricity does not directly offset heating carbon unless heat pumps or electric heating are part of the system definition.")
     lines.append("- If heat pumps/electric cooling are present, align PV production with those electrical loads before maximising export.")
-    lines.append("- Do not claim net metering, feed-in tariff, or utility approval status unless an external search module supplies that information.")
+    lines.append("- Do not claim or discuss net metering, feed-in tariff, transformer capacity, export cap, or utility approval status unless an external search module supplies that information.")
+    lines.append("- If external grid facts are missing, keep the main answer focused on design decisions. A short final precision note is allowed: contact the local distribution grid operator / utility and ask for the point-of-connection export limit, nearest transformer spare capacity, PV connection threshold, metering/switchgear requirements, and application timeline.")
     return "\n".join(lines)
 
 
@@ -1450,6 +1498,234 @@ def compute_compact_metrics(skill_id, cea_data, selected_buildings=None, scale="
     if skill_id == "optimize-my-design--panel-type-tradeoff":
         return compute_panel_tradeoff_metrics(cea_data, selected_buildings)
     return None
+
+
+def _clean_search_text(text, limit=700):
+    if not text:
+        return ""
+    text = re.sub(r"<script[\s\S]*?</script>", " ", text, flags=re.I)
+    text = re.sub(r"<style[\s\S]*?</style>", " ", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = html.unescape(text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:limit].strip()
+
+
+def _decode_duckduckgo_url(url):
+    if not url:
+        return ""
+    url = html.unescape(url)
+    parsed = urlparse(url)
+    if "duckduckgo.com" in parsed.netloc:
+        uddg = parse_qs(parsed.query).get("uddg")
+        if uddg:
+            return unquote(uddg[0])
+    return url
+
+
+def _official_source_score(url):
+    host = urlparse(url).netloc.lower()
+    if any(d in host for d in ["admin.ch", ".gov", ".gv.", "swissgrid.ch"]):
+        return 5
+    if any(d in host for d in ["ewz.ch", "bfe.admin.ch", "elcom.admin.ch"]):
+        return 4
+    if any(k in host for k in ["energie", "energy", "utility", "grid", "netz", "strom"]):
+        return 3
+    return 1
+
+
+def _search_duckduckgo(query, max_results=4):
+    try:
+        resp = requests.get(
+            f"https://duckduckgo.com/html/?q={quote_plus(query)}",
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=8,
+        )
+        resp.raise_for_status()
+    except Exception:
+        return []
+
+    html_text = resp.text
+    matches = re.findall(
+        r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
+        html_text,
+        flags=re.I | re.S,
+    )
+    results = []
+    for raw_url, raw_title in matches:
+        url = _decode_duckduckgo_url(raw_url)
+        if not url.startswith("http"):
+            continue
+        title = _clean_search_text(raw_title, 140)
+        results.append({"title": title, "url": url})
+    results = sorted(results, key=lambda r: _official_source_score(r["url"]), reverse=True)
+    return results[:max_results]
+
+
+def _fetch_public_grid_page_summary(url):
+    try:
+        resp = requests.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=8,
+        )
+        resp.raise_for_status()
+    except Exception:
+        return ""
+
+    text = resp.text[:120000]
+    title_match = re.search(r"<title[^>]*>(.*?)</title>", text, flags=re.I | re.S)
+    desc_match = re.search(
+        r'<meta[^>]+name=["\']description["\'][^>]+content=["\'](.*?)["\']',
+        text,
+        flags=re.I | re.S,
+    )
+    title = _clean_search_text(title_match.group(1), 140) if title_match else ""
+    desc = _clean_search_text(desc_match.group(1), 260) if desc_match else ""
+
+    plain = _clean_search_text(text, 5000)
+    keywords = [
+        "photovoltaic", "pv", "solar", "feed-in", "feed in", "export",
+        "grid connection", "connection", "transformer", "capacity",
+        "meter", "tariff", "remuneration", "utility", "distribution",
+        "netz", "einspeis", "strom", "anschluss",
+    ]
+    sentences = re.split(r"(?<=[.!?])\s+", plain)
+    useful = []
+    for sent in sentences:
+        s_lower = sent.lower()
+        if any(k in s_lower for k in keywords):
+            useful.append(sent.strip())
+        if len(useful) >= 3:
+            break
+    parts = [p for p in [title, desc, " ".join(useful)] if p]
+    return _clean_search_text(" ".join(parts), 700)
+
+
+def _parse_weather_place(weather_header):
+    location = parse_epw_location(weather_header or "")
+    city = (location or {}).get("city") or ""
+    country = (location or {}).get("country") or ""
+    city_clean = re.sub(r"^(Inducity|City|Weather)[-_ ]", "", city, flags=re.I).strip()
+    city_clean = city_clean.split("-")[-1].strip() if "-" in city_clean else city_clean
+    return city_clean, country
+
+
+def _template_match_score(template, city, country):
+    match = template.get("match", {})
+    haystack = f"{city} {country}".lower()
+    score = 0
+    for item in match.get("countries", []):
+        if item and item.lower() in {country.lower(), haystack}:
+            score += 8
+        elif item and item.lower() in haystack:
+            score += 6
+    for item in match.get("keywords", []):
+        if item and item.lower() in haystack:
+            score += 4
+    return score
+
+
+def _format_infrastructure_template(name, template):
+    if not template:
+        return ""
+
+    def clipped(items, limit):
+        return [str(item) for item in (items or [])[:limit]]
+
+    lines = [f"Regional infrastructure baseline: {name.replace('_', ' ').title()}"]
+    context = clipped(template.get("context"), 3)
+    design = clipped(template.get("design_implications"), 4)
+    ask = clipped(template.get("ask_for_precision"), 5)
+    sources = clipped(template.get("sources"), 3)
+    if context:
+        lines.append("Stable context:")
+        lines.extend(f"- {item}" for item in context)
+    if design:
+        lines.append("Concept-design implications:")
+        lines.extend(f"- {item}" for item in design)
+    if ask:
+        lines.append("For a more precise result, ask the responsible utility/grid operator for:")
+        lines.extend(f"- {item}" for item in ask)
+    if sources:
+        lines.append("Baseline sources:")
+        lines.extend(f"- {item}" for item in sources)
+    return "\n".join(lines)
+
+
+def regional_infrastructure_context(weather_header):
+    templates = load_infrastructure_context()
+    if not templates:
+        return ""
+
+    city, country = _parse_weather_place(weather_header)
+    best_name = "generic"
+    best_score = -1
+    for name, template in templates.items():
+        if name == "generic":
+            continue
+        score = _template_match_score(template, city, country)
+        if score > best_score:
+            best_name = name
+            best_score = score
+
+    if best_score <= 0:
+        best_name = "generic"
+    return _format_infrastructure_template(best_name, templates.get(best_name, {}))
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def research_public_grid_context(weather_header, skill_id):
+    if skill_id != "site-potential--contextual-feasibility--infrastructure-readiness":
+        return ""
+
+    city_clean, country = _parse_weather_place(weather_header)
+    place = " ".join(p for p in [city_clean, country if country != "-" else ""] if p).strip()
+    if not place:
+        place = "Switzerland"
+
+    queries = [
+        f"{place} photovoltaic grid connection export limit utility",
+        f"{place} solar PV feed-in tariff grid connection",
+        f"{place} distribution grid operator photovoltaic connection transformer capacity",
+    ]
+    if "switzerland" not in place.lower() and country in ("", "-"):
+        queries.append("Switzerland photovoltaic feed-in tariff grid connection export limit")
+
+    seen = set()
+    candidates = []
+    for query in queries:
+        for result in _search_duckduckgo(query, max_results=4):
+            url = result["url"]
+            host = urlparse(url).netloc.lower()
+            if url in seen or any(bad in host for bad in ["facebook", "linkedin", "youtube", "instagram"]):
+                continue
+            seen.add(url)
+            result["query"] = query
+            result["score"] = _official_source_score(url)
+            candidates.append(result)
+
+    candidates = sorted(candidates, key=lambda r: r["score"], reverse=True)[:4]
+    source_lines = []
+    for result in candidates:
+        summary = _fetch_public_grid_page_summary(result["url"])
+        if not summary:
+            continue
+        source_lines.append(
+            f"- {result['title'] or urlparse(result['url']).netloc} ({result['url']}): {summary}"
+        )
+        if len(source_lines) >= 3:
+            break
+
+    if not source_lines:
+        return ""
+
+    return "\n".join([
+        "Public grid / utility context found by lightweight web research:",
+        f"Search location: {place}",
+        *source_lines,
+        "Use these sources only for current public context. Do not infer exact transformer spare capacity or export cap unless a source explicitly states it.",
+    ])
 
 
 def call_llm(system_prompt, messages):
@@ -1703,6 +1979,15 @@ A practical recipe for the architect based on the results. No charts.
         )
 
     if compact_metrics:
+        public_context = ""
+        if skill_id == "site-potential--contextual-feasibility--infrastructure-readiness":
+            weather_header = (cea_data.get("files", {}) or {}).get("weather_header", "")
+            context_parts = [
+                regional_infrastructure_context(weather_header),
+                research_public_grid_context(weather_header, skill_id),
+            ]
+            public_context = "\n\n".join(part for part in context_parts if part)
+        public_context_block = f"\n## Public grid/context research\n{public_context}\n" if public_context else ""
         return f"""You are a BIPV expert helping architects interpret CEA4 simulation results.
 Scale: {scale}{building_context}
 
@@ -1713,8 +1998,9 @@ Scale: {scale}{building_context}
 
 ## Computed metrics
 {compact_metrics}
+{public_context_block}
 
-Use only the computed metrics above. Do not invent missing values, sources, tariffs, regulations, or file contents. If a value is unavailable, say so briefly and explain the limitation.
+Use only the computed metrics and supplied public research above. Do not invent missing values, sources, tariffs, regulations, transformer capacity, export caps, or file contents. If exact public grid values are not supplied, do not pretend they are known; use the CEA/project evidence and public context to give concept-stage choices, then add a short precision note only if useful.
 Do NOT describe, mention, or suggest visualizations or charts — these are generated automatically by the app.
 Do NOT use markdown headers (#) or numbered lists. You MAY use **bold** sparingly for key numbers and surface names."""
 
