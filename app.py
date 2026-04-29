@@ -63,6 +63,7 @@ SKILLS_INDEX_PATH = Path(__file__).parent / "configuration" / "skills-index.json
 SKILLS_DIR = Path(__file__).parent / "skills"
 INFRASTRUCTURE_CONTEXT_PATH = Path(__file__).parent / "configuration" / "infrastructure_context.json"
 REGULATORY_CONTEXT_PATH = Path(__file__).parent / "configuration" / "regulatory_context.json"
+ECONOMIC_CONTEXT_PATH = Path(__file__).parent / "configuration" / "economic_context.json"
 
 @st.cache_data
 def load_skills_index():
@@ -81,6 +82,13 @@ def load_regulatory_context():
     if not REGULATORY_CONTEXT_PATH.exists():
         return {}
     with open(REGULATORY_CONTEXT_PATH) as f:
+        return json.load(f)
+
+@st.cache_data
+def load_economic_context():
+    if not ECONOMIC_CONTEXT_PATH.exists():
+        return {}
+    with open(ECONOMIC_CONTEXT_PATH) as f:
         return json.load(f)
 
 @st.cache_data(ttl=3600)
@@ -1929,6 +1937,241 @@ def regional_regulatory_context(weather_header):
     return formatted.replace("Regional infrastructure baseline:", "Regional regulatory baseline:")
 
 
+CEA_USE_TYPE_MAP = {
+    # Residential
+    "MULTI_RES": "residential", "SINGLE_RES": "residential", "RESIDENTIAL": "residential",
+    # Commercial
+    "OFFICE": "commercial", "RETAIL": "commercial", "HOTEL": "commercial",
+    "RESTAURANT": "commercial", "FOODSTORE": "commercial", "SUPERMARKET": "commercial",
+    "LIBRARY": "commercial", "MUSEUM": "commercial", "GYM": "commercial",
+    "SWIMMING": "commercial", "CINEMA": "commercial", "COMMERCE": "commercial",
+    # Public / institutional
+    "HOSPITAL": "public", "SCHOOL": "public", "UNIVERSITY": "public",
+    "GOVERNMENT": "public", "POLICE": "public", "FIRE": "public",
+    "COMMUNITY": "public", "RELIGION": "public",
+    # Industrial
+    "INDUSTRIAL": "industrial", "WAREHOUSE": "industrial", "LOGISTICS": "industrial",
+    "WORKSHOP": "industrial",
+    # Parking / unclear — leave as mixed
+    "PARKING": "mixed",
+}
+
+
+def detect_building_use_types(cea_data, selected_buildings=None):
+    """
+    Read use type columns from zone_geometry.csv (from zone.dbf).
+    Returns a dict: {use_category: fraction} e.g. {'commercial': 0.7, 'residential': 0.3}
+    and a dominant category string.
+    """
+    zone_df = (cea_data.get("files") or {}).get("zone_geometry.csv")
+    if zone_df is None:
+        return None, None
+
+    if selected_buildings:
+        name_col = _find_metric_col(zone_df, "name", "building")
+        if name_col:
+            zone_df = zone_df[zone_df[name_col].isin(selected_buildings)]
+
+    if zone_df.empty:
+        return None, None
+
+    # CEA4 use type columns: use1, use1r (ratio), use2, use2r, use3, use3r
+    # Also REFERENCE (typology code like "MULTI_RES_1980")
+    use_col_pairs = [
+        (_find_metric_col(zone_df, "use1", "use_1"), _find_metric_col(zone_df, "use1r", "use_1r")),
+        (_find_metric_col(zone_df, "use2", "use_2"), _find_metric_col(zone_df, "use2r", "use_2r")),
+        (_find_metric_col(zone_df, "use3", "use_3"), _find_metric_col(zone_df, "use3r", "use_3r")),
+    ]
+
+    category_weights = {}
+    found_any = False
+
+    for use_col, ratio_col in use_col_pairs:
+        if not use_col:
+            continue
+        for _, row in zone_df.iterrows():
+            raw = str(row.get(use_col, "") or "").strip().upper()
+            if not raw:
+                continue
+            # Try matching known codes; also try REFERENCE prefix (e.g. "MULTI_RES_1980_SFH")
+            category = CEA_USE_TYPE_MAP.get(raw)
+            if not category:
+                for code, cat in CEA_USE_TYPE_MAP.items():
+                    if raw.startswith(code):
+                        category = cat
+                        break
+            if not category:
+                continue
+            found_any = True
+            ratio = 1.0
+            if ratio_col and ratio_col in zone_df.columns:
+                try:
+                    ratio = float(row.get(ratio_col, 1.0) or 1.0)
+                except (ValueError, TypeError):
+                    ratio = 1.0
+            category_weights[category] = category_weights.get(category, 0.0) + ratio
+
+    # Also try REFERENCE column as a fallback
+    ref_col = _find_metric_col(zone_df, "REFERENCE", "reference", "typology")
+    if ref_col and not found_any:
+        for _, row in zone_df.iterrows():
+            raw = str(row.get(ref_col, "") or "").strip().upper()
+            for code, cat in CEA_USE_TYPE_MAP.items():
+                if raw.startswith(code):
+                    category_weights[cat] = category_weights.get(cat, 0.0) + 1.0
+                    found_any = True
+                    break
+
+    if not found_any or not category_weights:
+        return None, None
+
+    total = sum(category_weights.values())
+    fractions = {k: round(v / total, 2) for k, v in category_weights.items()}
+    dominant = max(fractions, key=fractions.get)
+    return fractions, dominant
+
+
+def regional_economic_context(weather_header, cea_data=None, selected_buildings=None):
+    """Return hardcoded economic baseline for the project location and building use type."""
+    templates = load_economic_context()
+    if not templates:
+        return ""
+
+    city, country = _parse_weather_place(weather_header)
+    best_name = "generic"
+    best_score = -1
+    for name, template in templates.items():
+        if name == "generic":
+            continue
+        score = _template_match_score(template, city, country)
+        if score > best_score:
+            best_name = name
+            best_score = score
+
+    if best_score <= 0:
+        best_name = "generic"
+
+    t = templates.get(best_name, templates.get("generic", {}))
+    if not t:
+        return ""
+
+    # Detect building use type from zone_geometry if cea_data provided
+    use_fractions, dominant_use = None, None
+    if cea_data is not None:
+        use_fractions, dominant_use = detect_building_use_types(cea_data, selected_buildings)
+
+    currency = t.get("currency", "EUR")
+    sym = t.get("currency_symbol", "€")
+
+    def fmt_price(val):
+        if val is None:
+            return "not hardcoded"
+        return f"{sym} {val:.2f}"
+
+    lines = [f"Hardcoded regional economic baseline: {best_name.replace('_', ' ').title()}"]
+    lines.append(f"Local currency: {currency} ({sym})")
+    lines.append(f"IMPORTANT: All prices below are already in {currency}. Do NOT convert them or express them in EUR/USD unless the user asks for a comparison. Use {sym} symbol throughout the response.")
+
+    # Use type detection result
+    use_type_data = t.get("electricity_by_use_type", {})
+    if use_fractions and dominant_use and use_type_data:
+        use_summary = ", ".join(f"{cat} {int(frac*100)}%" for cat, frac in sorted(use_fractions.items(), key=lambda x: -x[1]))
+        lines.append(f"Building use type (from zone_geometry.csv): {use_summary}")
+        lines.append(f"Dominant use type: {dominant_use}")
+        # Use the dominant use type price
+        use_entry = use_type_data.get(dominant_use, {})
+        elec = use_entry.get("price")
+        elec_lo = use_entry.get("range_low")
+        elec_hi = use_entry.get("range_high")
+        elec_note = use_entry.get("note", "")
+        if elec is not None:
+            range_str = f" (range {sym} {elec_lo:.2f}–{sym} {elec_hi:.2f}/kWh)" if elec_lo and elec_hi else ""
+            lines.append(f"Electricity price for {dominant_use} use: {sym} {elec:.2f}/kWh{range_str}")
+            lines.append(f"Tariff note: {elec_note}")
+        # If mixed use, show all relevant prices
+        if len(use_fractions) > 1:
+            lines.append("Per-use-type electricity prices (for mixed-use payback calculation):")
+            for cat, frac in sorted(use_fractions.items(), key=lambda x: -x[1]):
+                entry = use_type_data.get(cat, {})
+                p = entry.get("price")
+                if p is not None:
+                    lines.append(f"  {cat} ({int(frac*100)}% of building): {sym} {p:.2f}/kWh — {entry.get('note','')}")
+        use_type_note = t.get("use_type_tariff_note", "")
+        if use_type_note:
+            lines.append(f"Use type tariff context: {use_type_note}")
+    else:
+        # No use type detected — fall back to showing all categories
+        if use_type_data and any(v.get("price") is not None for v in use_type_data.values()):
+            lines.append("Building use type: not detected from zone_geometry.csv — showing all tariff categories below.")
+            lines.append("Use the building programme description to select the most relevant tariff category:")
+            for cat, entry in use_type_data.items():
+                p = entry.get("price")
+                lo = entry.get("range_low")
+                hi = entry.get("range_high")
+                if p is not None:
+                    range_str = f" (range {sym} {lo:.2f}–{sym} {hi:.2f}/kWh)" if lo and hi else ""
+                    lines.append(f"  {cat}: {sym} {p:.2f}/kWh{range_str} — {entry.get('note','')}")
+            use_type_note = t.get("use_type_tariff_note", "")
+            if use_type_note:
+                lines.append(f"Use type tariff context: {use_type_note}")
+        else:
+            # generic fallback
+            elec = t.get("electricity_price_kwh")
+            elec_lo = t.get("electricity_price_range_low")
+            elec_hi = t.get("electricity_price_range_high")
+            if elec is not None:
+                range_str = f" (range {sym} {elec_lo:.2f}–{sym} {elec_hi:.2f}/kWh)" if elec_lo and elec_hi else ""
+                lines.append(f"Electricity price: {sym} {elec:.2f}/kWh{range_str}")
+            lines.append(f"Electricity price note: {t.get('electricity_price_note', '')}")
+    lines.append(f"Electricity price trend: {t.get('electricity_price_trend', 'unknown')}")
+
+    exp = t.get("export_compensation_kwh")
+    exp_lo = t.get("export_compensation_range_low")
+    exp_hi = t.get("export_compensation_range_high")
+    if exp is not None:
+        range_str = f" (range {sym} {exp_lo:.2f}–{sym} {exp_hi:.2f}/kWh)" if exp_lo and exp_hi else ""
+        lines.append(f"Export/feed-in compensation: {sym} {exp:.2f}/kWh{range_str}")
+    lines.append(f"Export compensation note: {t.get('export_compensation_note', '')}")
+
+    cost_f_lo = t.get("bipv_cost_facade_m2_low")
+    cost_f_hi = t.get("bipv_cost_facade_m2_high")
+    cost_r_lo = t.get("bipv_cost_roof_m2_low")
+    cost_r_hi = t.get("bipv_cost_roof_m2_high")
+    if cost_f_lo and cost_f_hi:
+        lines.append(f"BIPV installed cost — facade: {sym} {cost_f_lo}–{sym} {cost_f_hi}/m²")
+    if cost_r_lo and cost_r_hi:
+        lines.append(f"BIPV installed cost — roof: {sym} {cost_r_lo}–{sym} {cost_r_hi}/m²")
+    lines.append(f"BIPV cost note: {t.get('bipv_cost_note', '')}")
+
+    pb_lo = t.get("payback_years_low")
+    pb_hi = t.get("payback_years_high")
+    if pb_lo and pb_hi:
+        lines.append(f"Typical simple payback: {pb_lo}–{pb_hi} years")
+    lines.append(f"Payback note: {t.get('payback_note', '')}")
+
+    gc = t.get("grid_carbon_kgco2_kwh")
+    if gc is not None:
+        lines.append(f"Grid carbon intensity: {gc:.3f} kgCO₂/kWh")
+    lines.append(f"Grid carbon note: {t.get('grid_carbon_note', '')}")
+
+    lines.append(f"Overall economic signal: {t.get('economic_signal', 'unknown')}")
+    lines.append(f"Primary BIPV argument for this location: {t.get('primary_argument', 'unknown')}")
+
+    incentives = t.get("incentives", [])
+    if incentives:
+        lines.append("Known incentives and schemes:")
+        for inc in incentives:
+            lines.append(f"- {inc}")
+
+    precision = t.get("precision_note", "")
+    if precision:
+        lines.append(f"Precision note (use this instead of generic ElCom/consultant boilerplate): {precision}")
+
+    lines.append(f"Currency enforcement rule: Every price, cost, and tariff in your response MUST use {currency} ({sym}). If a web search result returns a value in EUR or USD, convert it to {currency} using approximate current exchange rates before presenting it. Never show EUR or USD values to the user without first converting to {currency}.")
+
+    return "\n".join(lines)
+
+
 @st.cache_data(ttl=86400, show_spinner=False)
 def research_public_grid_context(weather_header, skill_id):
     if skill_id != "site-potential--contextual-feasibility--infrastructure-readiness":
@@ -2465,6 +2708,7 @@ No charts.
                 ]
             else:
                 context_parts = [
+                    regional_economic_context(weather_header, cea_data=cea_data, selected_buildings=selected_buildings),
                     research_public_contextual_feasibility(weather_header, skill_id),
                 ]
             public_context = "\n\n".join(part for part in context_parts if part)
