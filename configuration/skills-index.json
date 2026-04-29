@@ -143,14 +143,14 @@
       "status": "complete"
     },
     {
-      "id": "impact-and-viability--carbon-impact--operational-carbon-footprint",
-      "display_name": "Operational Carbon Footprint",
+      "id": "impact-and-viability--carbon-impact--carbon-footprint",
+      "display_name": "Carbon Footprint",
       "position_in_tree": [
         "Impact and Viability",
         "Carbon Impact",
-        "Operational Carbon Footprint"
+        "Carbon Footprint"
       ],
-      "tooltip": "How does BIPV change the building's annual operational carbon emissions compared to full grid dependency?",
+      "tooltip": "How much electricity-related carbon does the building create, and how much does BIPV avoid?",
       "data_source": "CEA",
       "status": "complete"
     },
