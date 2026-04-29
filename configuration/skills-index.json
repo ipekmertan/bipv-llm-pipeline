@@ -191,37 +191,25 @@
       "status": "complete"
     },
     {
-      "id": "optimize-my-design--surface-prioritization",
-      "display_name": "Surface Prioritisation",
+      "id": "optimize-my-design--design-integration-recipe",
+      "display_name": "Design Integration Recipe",
       "position_in_tree": [
         "Optimize My Design",
-        "Surface Prioritisation"
+        "Design Integration Recipe"
       ],
-      "tooltip": "Given limited budget or area, which surfaces should be prioritised for BIPV installation first?",
-      "data_source": "CEA",
-      "status": "complete"
+      "tooltip": "What is the full BIPV design recipe based on the analyses already run for this project?",
+      "data_source": "Prior analyses + CEA",
+      "status": "draft"
     },
     {
-      "id": "optimize-my-design--envelope-simplification",
-      "display_name": "Envelope Simplification",
+      "id": "optimize-my-design--pv-coverage-scenario",
+      "display_name": "PV Coverage Scenario",
       "position_in_tree": [
         "Optimize My Design",
-        "Envelope Simplification"
+        "PV Coverage Scenario"
       ],
-      "tooltip": "How can the building envelope be simplified or adjusted to improve BIPV integration and coverage?",
-      "data_source": "CEA + LLM knowledge",
-      "status": "complete"
-    },
-    {
-      "id": "optimize-my-design--construction-and-integration",
-      "display_name": "Construction & Integration",
-      "position_in_tree": [
-        "Optimize My Design",
-        "Construction & Integration"
-      ],
-      "tooltip": "What are the key construction and integration considerations for installing BIPV on this building?",
-      "data_source": "LLM knowledge",
-      "status": "complete"
+      "tooltip": "How do cost, carbon, and self-sufficiency change if I cover 0-100% of the recommended PV area?",
+      "data_source": "CEA + local calculation",
+      "status": "draft"
     }
   ]
-}
