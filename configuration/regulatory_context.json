@@ -1,0 +1,145 @@
+{
+  "generic": {
+    "match": {
+      "countries": [],
+      "keywords": []
+    },
+    "context": [
+      "BIPV regulatory risk usually depends on four early checks: roof height/building envelope, facade visibility, heritage or conservation status, and whether PV is mandatory or incentivised for new buildings.",
+      "Exact height limits, zoning names, and permit outcomes are parcel-specific and should not be invented from general country rules."
+    ],
+    "design_implications": [
+      "Treat roof-mounted PV as a height/envelope check before committing to raised mounting systems.",
+      "Treat street-facing facade BIPV as an aesthetic/material approval check before making it the central design feature.",
+      "Prefer roof-integrated or flush systems when height, glare, or visibility rules are uncertain."
+    ],
+    "ask_for_precision": [
+      "applicable zoning district and maximum building height",
+      "whether roof PV equipment counts toward building height",
+      "whether facade-integrated PV is permitted on street-facing elevations",
+      "heritage/conservation status of the parcel and adjacent streetscape",
+      "required permit drawings, material samples, glare study, and approval timeline"
+    ],
+    "sources": []
+  },
+  "switzerland": {
+    "match": {
+      "countries": ["Switzerland", "CHE", "CH"],
+      "keywords": ["zurich", "zürich", "zug", "geneva", "basel", "lausanne", "bern", "switzerland", "schweiz", "suisse"]
+    },
+    "context": [
+      "Swiss planning constraints are strongly municipal/cantonal. Building height, roof-form rules, heritage status, and facade appearance are normally controlled through local building and zoning regulations.",
+      "For Zurich, the relevant planning framework is commonly the municipal building and zoning ordinance context, but the exact height limit depends on the parcel's zone.",
+      "Solar installations may be straightforward on some roofs but more sensitive on visible facades, protected buildings, roofscapes, or heritage/conservation areas."
+    ],
+    "design_implications": [
+      "Check the parcel's exact building zone before relying on raised roof PV; if the building is near the height limit, prefer roof-integrated or low-profile BIPV.",
+      "Treat street-facing facade BIPV as an aesthetic approval risk unless the local authority/source confirms it is permitted.",
+      "For visible facades, prepare a material/colour/reflectivity strategy rather than presenting PV as standard technical equipment.",
+      "If the concept depends on roof PV, ask early whether PV build-up height counts toward the permitted building height."
+    ],
+    "ask_for_precision": [
+      "parcel zoning district and maximum height under the municipal building/zoning ordinance",
+      "whether roof-integrated, flush, or raised PV counts toward building height",
+      "whether facade BIPV on street-facing elevations needs aesthetic or planning approval",
+      "whether the parcel is in/near a protected, inventory, or heritage-sensitive area",
+      "which drawings, material samples, glare/reflectivity evidence, and consultation steps are expected"
+    ],
+    "sources": [
+      "https://www.stadt-zuerich.ch/hbd/de/index/staedtebau/planung/bzo.html",
+      "https://www.zh.ch/de/planen-bauen.html"
+    ]
+  },
+  "europe_generic": {
+    "match": {
+      "countries": ["Germany", "France", "Italy", "Spain", "Netherlands", "Austria", "Belgium", "Denmark", "Sweden", "Norway", "Finland"],
+      "keywords": ["europe", "eu", "germany", "france", "italy", "spain", "netherlands", "austria", "belgium", "denmark", "sweden", "norway", "finland"]
+    },
+    "context": [
+      "Roof and facade PV rules are usually split between national building/energy policy and local planning control.",
+      "Height, heritage, fire access, facade appearance, and glare can still constrain BIPV even where solar is encouraged."
+    ],
+    "design_implications": [
+      "Check height and roofscape rules before using raised roof PV.",
+      "Use flush/integrated systems where planning or heritage sensitivity is likely.",
+      "For visible facades, prepare colour, module rhythm, reflectivity, and material-integration evidence."
+    ],
+    "ask_for_precision": [
+      "local planning/zoning height envelope",
+      "heritage or protected-streetscape status",
+      "facade material and reflectivity rules",
+      "whether solar is mandatory for the building type",
+      "permit route and approval timeline"
+    ],
+    "sources": []
+  },
+  "united_kingdom": {
+    "match": {
+      "countries": ["United Kingdom", "UK", "Great Britain", "England", "Scotland", "Wales"],
+      "keywords": ["uk", "united kingdom", "great britain", "england", "scotland", "wales", "london"]
+    },
+    "context": [
+      "PV may be permitted development in some UK cases, but rules differ for listed buildings, conservation areas, roof visibility, and non-domestic projects.",
+      "Planning and building-control requirements can differ, and grid connection is separate from planning permission."
+    ],
+    "design_implications": [
+      "Check listed-building and conservation-area status before relying on visible roof or facade BIPV.",
+      "Use flush, low-glare, roof-integrated systems where roofscape visibility is sensitive.",
+      "Prepare facade material and visual-impact evidence if BIPV is street-facing."
+    ],
+    "ask_for_precision": [
+      "whether the building is listed or in a conservation area",
+      "whether the proposed PV qualifies as permitted development",
+      "maximum projection/height rules for roof equipment",
+      "local planning authority requirements for facade PV",
+      "required drawings, visual-impact evidence, and approval timeline"
+    ],
+    "sources": []
+  },
+  "united_states": {
+    "match": {
+      "countries": ["United States", "USA", "US"],
+      "keywords": ["united states", "usa", "california", "new york", "texas", "florida", "chicago", "boston"]
+    },
+    "context": [
+      "US solar requirements are local/state-specific. Some jurisdictions encourage or require solar-ready/PV, while zoning, historic districts, fire setbacks, and structural review can constrain placement.",
+      "Height and roof-equipment treatment are normally zoning/building-code questions, not energy-simulation outputs."
+    ],
+    "design_implications": [
+      "Check local zoning height and rooftop-equipment rules before relying on raised PV racks.",
+      "Reserve roof access/fire pathway zones before assuming full roof coverage.",
+      "For historic districts or visible facades, use integrated or visually compatible BIPV and expect design review."
+    ],
+    "ask_for_precision": [
+      "zoning height limit and rooftop-equipment exemption",
+      "historic district/design review status",
+      "fire access/setback requirements for roof PV",
+      "solar-ready or mandatory PV requirement",
+      "permit drawing and structural review requirements"
+    ],
+    "sources": []
+  },
+  "asia_generic": {
+    "match": {
+      "countries": [],
+      "keywords": ["asia", "southeast asia", "east asia", "south asia"]
+    },
+    "context": [
+      "Asian BIPV regulation varies strongly by country, city, and development-control system. Dense urban sites often make height envelope, facade appearance, and roof equipment rules important.",
+      "High-rise and mixed-use projects may require separate planning, facade, fire-safety, and utility approvals."
+    ],
+    "design_implications": [
+      "Check whether roof PV affects the legal height envelope before using raised systems.",
+      "Use facade-integrated PV as an architectural material strategy where roof area is limited, but confirm facade approval and glare rules.",
+      "In hot climates, regulatory review may intersect with fire access, maintenance access, and facade safety."
+    ],
+    "ask_for_precision": [
+      "development-control height limit",
+      "whether rooftop PV equipment counts toward gross height",
+      "facade approval and glare/reflectivity requirements",
+      "fire and maintenance access requirements",
+      "mandatory solar or green-building requirements"
+    ],
+    "sources": []
+  }
+}
