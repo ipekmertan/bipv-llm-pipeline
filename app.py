@@ -62,6 +62,7 @@ h1, h2, h3 { font-family: 'Inter', serif; }
 SKILLS_INDEX_PATH = Path(__file__).parent / "configuration" / "skills-index.json"
 SKILLS_DIR = Path(__file__).parent / "skills"
 INFRASTRUCTURE_CONTEXT_PATH = Path(__file__).parent / "configuration" / "infrastructure_context.json"
+REGULATORY_CONTEXT_PATH = Path(__file__).parent / "configuration" / "regulatory_context.json"
 
 @st.cache_data
 def load_skills_index():
@@ -73,6 +74,13 @@ def load_infrastructure_context():
     if not INFRASTRUCTURE_CONTEXT_PATH.exists():
         return {}
     with open(INFRASTRUCTURE_CONTEXT_PATH) as f:
+        return json.load(f)
+
+@st.cache_data
+def load_regulatory_context():
+    if not REGULATORY_CONTEXT_PATH.exists():
+        return {}
+    with open(REGULATORY_CONTEXT_PATH) as f:
         return json.load(f)
 
 @st.cache_data(ttl=3600)
@@ -495,6 +503,19 @@ COMPACT_SKILL_TASKS = {
         "allowance, risers, metering/switchgear space, storage readiness, and thermal-system narrative. "
         "If precise utility data is missing, keep the main answer useful and add only a short precision note "
         "saying who to contact and exactly what to ask."
+    ),
+    "site-potential--contextual-feasibility--regulatory-constraints": (
+        "Combine the project location with supplied public planning/regulatory context to turn BIPV rules into "
+        "early design choices: whether roof/facade BIPV is likely straightforward, restricted, mandatory, "
+        "heritage-sensitive, documentation-heavy, or timeline-sensitive. If precise local planning status is "
+        "missing, keep the main answer useful and add a short precision note saying which authority to contact "
+        "and exactly what to ask."
+    ),
+    "site-potential--contextual-feasibility--basic-economic-signal": (
+        "Combine the project location with supplied public market/economic context to identify the strongest "
+        "early BIPV argument: electricity-cost savings, carbon reduction, regulation/compliance, architectural "
+        "value, or resilience. Use prices, grid carbon, export compensation, cost ranges, and payback ranges "
+        "only when supplied; otherwise give a useful concept-level framing and a short precision note."
     ),
     "optimize-my-design--panel-type-tradeoff": (
         "Interpret the simulated PV panel type comparison using actual generation, installed area, yield "
@@ -1599,6 +1620,70 @@ def compute_panel_tradeoff_metrics(cea_data, selected_buildings=None):
     return "\n".join(lines)
 
 
+def compute_contextual_feasibility_metrics(skill_id, cea_data, selected_buildings=None, scale="District"):
+    files = cea_data.get("files", {})
+    city, country = _parse_weather_place(files.get("weather_header", ""))
+    place = " ".join(p for p in [city, country if country != "-" else ""] if p).strip() or "unknown location"
+
+    lines = [
+        f"Project location from weather file: {place}.",
+        f"Scale: {scale}.",
+    ]
+    if selected_buildings:
+        lines.append(f"Selected buildings: {', '.join(selected_buildings)}.")
+
+    if skill_id == "site-potential--contextual-feasibility--regulatory-constraints":
+        zone_df = files.get("zone_geometry.csv")
+        height_lines = []
+        if zone_df is not None:
+            name_col = _find_metric_col(zone_df, "name", "building")
+            height_col = _height_col(zone_df)
+            if name_col and height_col:
+                check_df = zone_df.copy()
+                if selected_buildings:
+                    check_df = check_df[check_df[name_col].isin(selected_buildings)]
+                heights = []
+                for _, row in check_df.iterrows():
+                    h = _height_value(row, height_col)
+                    if h is not None:
+                        heights.append((str(row[name_col]), h))
+                if heights:
+                    max_name, max_height = max(heights, key=lambda item: item[1])
+                    height_lines.append(
+                        f"Extracted project building height from zone_geometry.csv: tallest selected/project building is {max_name} at approximately {_format_number(max_height, ' m', 1)}."
+                    )
+                    if len(heights) <= 6:
+                        height_lines.append(
+                            "Building heights available: "
+                            + "; ".join(f"{name}: {_format_number(height, ' m', 1)}" for name, height in heights)
+                            + "."
+                        )
+                    else:
+                        height_lines.append(f"Building heights available for {len(heights)} project buildings.")
+        if not height_lines:
+            height_lines.append("No usable project building height was extracted from zone_geometry.csv; height-limit comparison can only be qualitative unless a height is supplied elsewhere.")
+
+        lines.extend([
+            "This is an internet-first contextual feasibility skill. CEA supplies the project location only; public planning/regulatory sources supply the useful context.",
+            "Interpret public facts into early BIPV design decisions: roof vs facade feasibility, visibility/heritage sensitivity, material/reflectivity constraints, mandatory solar requirements, permit path, documentation needs, and approval timeline risk.",
+            "Contextual feasibility retrieval logic: use local/city facts when found; if local facts are missing, use national context; if national facts are missing, use regional/continental context; if that is missing, use industry-average guidance only. Always label the level of certainty. Broader context can guide early design but cannot replace parcel-specific approval.",
+            "Height/zoning rule: if public/preloaded context supplies a maximum building height, compare it against the extracted project height and flag whether roof-mounted BIPV could approach or exceed the limit. Do not invent a maximum height or roof PV build-up height.",
+            "If exact parcel/conservation-zone/height-zone status is missing, do not invent it. Add a short precision note at the end naming the local planning/building authority and asking for facade PV permission route, heritage/conservation status, applicable height limit, whether roof PV equipment counts toward height, material/reflectivity limits, required drawings, and approval timeline.",
+            "Mode split: Key insight gives the regulatory stance and priorities; Explain the numbers gives source facts, terms, dates, thresholds, and permit/timeline evidence; Design implication gives the design response and documentation actions."
+        ])
+        lines.extend(height_lines)
+    elif skill_id == "site-potential--contextual-feasibility--basic-economic-signal":
+        lines.extend([
+            "This is an internet-first contextual feasibility skill. CEA supplies the project location only; public market/energy sources supply the useful context.",
+            "Interpret public facts into early BIPV positioning: whether the strongest argument is electricity savings, carbon reduction, regulation/compliance, architectural value, resilience, or client-image value.",
+            "Contextual feasibility retrieval logic: use local/city facts when found; if local facts are missing, use national context; if national facts are missing, use regional/continental context; if that is missing, use industry-average benchmarks only. Always label the level of certainty. Broader benchmarks can guide early client framing but cannot replace project tariffs or quotes.",
+            "Benchmarks for orientation only: electricity price >0.20 EUR/kWh suggests stronger savings potential; 0.10-0.20 is marginal; <0.10 is weak. Grid carbon >0.4 kgCO2/kWh strengthens the carbon argument; 0.2-0.4 is moderate; <0.2 is weaker. Typical payback <8 years is strong; 8-15 is marginal; >15 is weak.",
+            "If exact local tariffs, export compensation, BIPV cost range, or payback data are missing, do not invent them. Add a short precision note at the end naming the utility/energy authority or cost consultant and asking for tariff category, export compensation, installed BIPV cost/m2, subsidy eligibility, and expected payback assumptions.",
+            "Mode split: Key insight gives the client/design argument and priorities; Explain the numbers gives tariffs, carbon, cost, payback, and source evidence; Design implication gives sizing, framing, self-consumption/export strategy, and what not to overpromise."
+        ])
+    return "\n".join(lines)
+
+
 def compute_compact_metrics(skill_id, cea_data, selected_buildings=None, scale="District"):
     if skill_id == "site-potential--solar-availability--temporal-availability--seasonal-patterns":
         return compute_seasonal_pattern_metrics(cea_data, selected_buildings, scale)
@@ -1612,6 +1697,11 @@ def compute_compact_metrics(skill_id, cea_data, selected_buildings=None, scale="
         return compute_massing_shading_metrics(cea_data, selected_buildings, scale)
     if skill_id == "site-potential--contextual-feasibility--infrastructure-readiness":
         return compute_infrastructure_readiness_metrics(cea_data, selected_buildings, scale)
+    if skill_id in (
+        "site-potential--contextual-feasibility--regulatory-constraints",
+        "site-potential--contextual-feasibility--basic-economic-signal",
+    ):
+        return compute_contextual_feasibility_metrics(skill_id, cea_data, selected_buildings, scale)
     if skill_id == "optimize-my-design--panel-type-tradeoff":
         return compute_panel_tradeoff_metrics(cea_data, selected_buildings)
     return None
@@ -1679,7 +1769,7 @@ def _search_duckduckgo(query, max_results=4):
     return results[:max_results]
 
 
-def _fetch_public_grid_page_summary(url):
+def _fetch_public_page_summary(url, keywords=None):
     try:
         resp = requests.get(
             url,
@@ -1701,12 +1791,13 @@ def _fetch_public_grid_page_summary(url):
     desc = _clean_search_text(desc_match.group(1), 260) if desc_match else ""
 
     plain = _clean_search_text(text, 5000)
-    keywords = [
+    if keywords is None:
+        keywords = [
         "photovoltaic", "pv", "solar", "feed-in", "feed in", "export",
         "grid connection", "connection", "transformer", "capacity",
         "meter", "tariff", "remuneration", "utility", "distribution",
         "netz", "einspeis", "strom", "anschluss",
-    ]
+        ]
     sentences = re.split(r"(?<=[.!?])\s+", plain)
     useful = []
     for sent in sentences:
@@ -1717,6 +1808,10 @@ def _fetch_public_grid_page_summary(url):
             break
     parts = [p for p in [title, desc, " ".join(useful)] if p]
     return _clean_search_text(" ".join(parts), 700)
+
+
+def _fetch_public_grid_page_summary(url):
+    return _fetch_public_page_summary(url)
 
 
 def _parse_weather_place(weather_header):
@@ -1770,6 +1865,27 @@ def _format_infrastructure_template(name, template):
     return "\n".join(lines)
 
 
+def _fallback_region_for_country(country):
+    c = (country or "").lower()
+    if c in {"switzerland", "che", "ch", "germany", "france", "italy", "spain", "netherlands", "austria", "belgium", "denmark", "sweden", "norway", "finland", "united kingdom", "uk", "great britain", "ireland", "portugal", "poland", "czech republic", "greece"}:
+        return "Europe"
+    if c in {"united states", "usa", "us", "canada", "mexico"}:
+        return "North America"
+    if c in {"brazil", "argentina", "chile", "colombia", "peru", "uruguay"}:
+        return "South America"
+    if c in {"china", "chn", "japan", "jpn", "india", "ind", "singapore", "sgp", "south korea", "korea", "thailand", "vietnam", "malaysia", "indonesia", "philippines"}:
+        return "Asia"
+    if c in {"united arab emirates", "uae", "saudi arabia", "qatar", "kuwait", "bahrain", "oman", "turkey", "türkiye", "turkiye", "israel", "jordan"}:
+        return "Middle East"
+    if c in {"south africa", "kenya", "nigeria", "egypt", "morocco", "ghana", "ethiopia", "tanzania", "uganda"}:
+        return "Africa"
+    if c in {"australia", "aus", "new zealand"}:
+        return "Oceania"
+    if c in {"russia", "russian federation", "rus"}:
+        return "Eurasia"
+    return "global"
+
+
 def regional_infrastructure_context(weather_header):
     templates = load_infrastructure_context()
     if not templates:
@@ -1791,6 +1907,28 @@ def regional_infrastructure_context(weather_header):
     return _format_infrastructure_template(best_name, templates.get(best_name, {}))
 
 
+def regional_regulatory_context(weather_header):
+    templates = load_regulatory_context()
+    if not templates:
+        return ""
+
+    city, country = _parse_weather_place(weather_header)
+    best_name = "generic"
+    best_score = -1
+    for name, template in templates.items():
+        if name == "generic":
+            continue
+        score = _template_match_score(template, city, country)
+        if score > best_score:
+            best_name = name
+            best_score = score
+
+    if best_score <= 0:
+        best_name = "generic"
+    formatted = _format_infrastructure_template(best_name, templates.get(best_name, {}))
+    return formatted.replace("Regional infrastructure baseline:", "Regional regulatory baseline:")
+
+
 @st.cache_data(ttl=86400, show_spinner=False)
 def research_public_grid_context(weather_header, skill_id):
     if skill_id != "site-potential--contextual-feasibility--infrastructure-readiness":
@@ -1799,39 +1937,75 @@ def research_public_grid_context(weather_header, skill_id):
     city_clean, country = _parse_weather_place(weather_header)
     place = " ".join(p for p in [city_clean, country if country != "-" else ""] if p).strip()
     if not place:
-        place = "Switzerland"
-
-    queries = [
-        f"{place} photovoltaic grid connection export limit utility",
-        f"{place} solar PV feed-in tariff grid connection",
-        f"{place} distribution grid operator photovoltaic connection transformer capacity",
+        place = country if country and country != "-" else "project location"
+    country_place = country if country and country != "-" else ""
+    broad_place = _fallback_region_for_country(country_place)
+    query_groups = [
+        (
+            "local / city-level search",
+            [
+                f"{place} photovoltaic grid connection export limit utility",
+                f"{place} solar PV feed-in tariff grid connection",
+                f"{place} distribution grid operator photovoltaic connection transformer capacity",
+            ],
+        )
     ]
-    if "switzerland" not in place.lower() and country in ("", "-"):
-        queries.append("Switzerland photovoltaic feed-in tariff grid connection export limit")
+    if country_place:
+        query_groups.append((
+            "national / country-level fallback",
+            [
+                f"{country_place} photovoltaic grid connection export limit utility",
+                f"{country_place} solar PV feed-in tariff grid connection",
+                f"{country_place} distribution grid operator photovoltaic transformer capacity",
+            ],
+        ))
+    query_groups.append((
+        "regional / continental fallback",
+        [
+            f"{broad_place} photovoltaic grid connection export limits distributed solar",
+            f"{broad_place} rooftop solar export limit distribution grid transformer capacity",
+            f"{broad_place} solar PV feed-in tariff grid connection rules",
+        ],
+    ))
+    query_groups.append((
+        "industry-average fallback",
+        [
+            "distributed solar grid connection export limit transformer capacity industry guidance",
+            "rooftop solar PV export constraints self-consumption storage grid connection guidance",
+            "BIPV grid connection export limitation transformer capacity design guidance",
+        ],
+    ))
 
     seen = set()
-    candidates = []
-    for query in queries:
-        for result in _search_duckduckgo(query, max_results=4):
-            url = result["url"]
-            host = urlparse(url).netloc.lower()
-            if url in seen or any(bad in host for bad in ["facebook", "linkedin", "youtube", "instagram"]):
-                continue
-            seen.add(url)
-            result["query"] = query
-            result["score"] = _official_source_score(url)
-            candidates.append(result)
-
-    candidates = sorted(candidates, key=lambda r: r["score"], reverse=True)[:4]
     source_lines = []
-    for result in candidates:
-        summary = _fetch_public_grid_page_summary(result["url"])
-        if not summary:
-            continue
-        source_lines.append(
-            f"- {result['title'] or urlparse(result['url']).netloc} ({result['url']}): {summary}"
-        )
-        if len(source_lines) >= 3:
+    used_levels = []
+    for level, queries in query_groups:
+        candidates = []
+        for query in queries:
+            for result in _search_duckduckgo(query, max_results=4):
+                url = result["url"]
+                host = urlparse(url).netloc.lower()
+                if url in seen or any(bad in host for bad in ["facebook", "linkedin", "youtube", "instagram"]):
+                    continue
+                seen.add(url)
+                result["query"] = query
+                result["level"] = level
+                result["score"] = _official_source_score(url)
+                candidates.append(result)
+
+        candidates = sorted(candidates, key=lambda r: r["score"], reverse=True)[:5]
+        for result in candidates:
+            summary = _fetch_public_grid_page_summary(result["url"])
+            if not summary:
+                continue
+            source_lines.append(
+                f"- [{result['level']}] {result['title'] or urlparse(result['url']).netloc} ({result['url']}): {summary}"
+            )
+            if result["level"] not in used_levels:
+                used_levels.append(result["level"])
+            if len(source_lines) >= 3:
+                break
+        if source_lines:
             break
 
     if not source_lines:
@@ -1840,8 +2014,176 @@ def research_public_grid_context(weather_header, skill_id):
     return "\n".join([
         "Public grid / utility context found by lightweight web research:",
         f"Search location: {place}",
+        f"Search scale used: {', '.join(used_levels) if used_levels else 'none'}",
         *source_lines,
-        "Use these sources only for current public context. Do not infer exact transformer spare capacity or export cap unless a source explicitly states it.",
+        "Use these sources only for current public context. Label whether each useful fact is local, national, regional/continental, or industry-average. Do not infer exact transformer spare capacity or export cap unless a source explicitly states it.",
+    ])
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def research_public_contextual_feasibility(weather_header, skill_id):
+    if skill_id not in (
+        "site-potential--contextual-feasibility--regulatory-constraints",
+        "site-potential--contextual-feasibility--basic-economic-signal",
+    ):
+        return ""
+
+    city_clean, country = _parse_weather_place(weather_header)
+    place = " ".join(p for p in [city_clean, country if country != "-" else ""] if p).strip()
+    if not place:
+        place = country if country and country != "-" else "project location"
+
+    if skill_id == "site-potential--contextual-feasibility--regulatory-constraints":
+        label = "Public planning / regulatory context found by lightweight web research:"
+        local_place = place
+        country_place = country if country and country != "-" else ""
+        broad_place = _fallback_region_for_country(country_place)
+        query_groups = [
+            (
+                "local / city-level search",
+                [
+                    f"{local_place} photovoltaic facade building permit planning permission",
+                    f"{local_place} solar panels building regulations heritage conservation area",
+                    f"{local_place} building height limit zoning photovoltaic roof solar",
+                    f"{local_place} zoning building height limit roof equipment photovoltaic",
+                    f"{local_place} mandatory solar photovoltaic new buildings building code",
+                    f"{local_place} BIPV facade roof permit local planning authority",
+                ],
+            )
+        ]
+        if country_place:
+            query_groups.append((
+                "national / country-level fallback",
+                [
+                    f"{country_place} photovoltaic facade building permit planning permission",
+                    f"{country_place} solar panels building regulations heritage conservation area",
+                    f"{country_place} building height limit zoning photovoltaic roof solar",
+                    f"{country_place} mandatory solar photovoltaic new buildings building code",
+                    f"{country_place} BIPV facade roof permit building regulations",
+                ],
+            ))
+        query_groups.append((
+            "regional / continental fallback",
+            [
+                f"{broad_place} photovoltaic building regulations facade roof planning permission",
+                f"{broad_place} solar panels heritage conservation building height roof equipment",
+                f"{broad_place} BIPV facade regulations reflectivity glare building permit",
+            ],
+        ))
+        query_groups.append((
+            "industry-average fallback",
+            [
+                "BIPV facade roof planning constraints height heritage reflectivity industry guidance",
+                "building integrated photovoltaics regulatory constraints facade roof heritage height guidance",
+                "BIPV design guide planning permission facade roof reflectivity glare height constraints",
+            ],
+        ))
+        keywords = [
+            "photovoltaic", "solar", "bipv", "building permit", "planning",
+            "permission", "heritage", "conservation", "facade", "façade",
+            "roof", "building code", "mandatory", "requirement", "regulation",
+            "authority", "zoning", "height limit", "building height", "roof equipment",
+            "reflectivity", "glare", "material",
+        ]
+        closing_rule = (
+            "Use these sources only for public planning context. Label whether each useful fact is local, national, regional/continental, or industry-average. Do not infer exact parcel heritage/conservation status, "
+            "height-zone status, roof-equipment height treatment, permit outcome, or mandatory coverage unless a source explicitly states it."
+        )
+    else:
+        label = "Public market / economic context found by lightweight web research:"
+        country_place = country if country and country != "-" else ""
+        broad_place = _fallback_region_for_country(country_place)
+        query_groups = [
+            (
+                "local / city-level search",
+                [
+                    f"{place} electricity tariff commercial residential kWh official",
+                    f"{place} solar PV feed-in tariff export compensation official",
+                    f"{place} grid carbon intensity electricity official",
+                    f"{place} BIPV installation cost per m2 payback solar",
+                ],
+            )
+        ]
+        if country_place:
+            query_groups.append((
+                "national / country-level fallback",
+                [
+                    f"{country_place} electricity tariff commercial residential kWh official",
+                    f"{country_place} solar PV feed-in tariff export compensation official",
+                    f"{country_place} grid carbon intensity electricity official",
+                    f"{country_place} BIPV installation cost per m2 payback solar",
+                ],
+            ))
+        query_groups.append((
+            "regional / continental fallback",
+            [
+                f"{broad_place} BIPV installation cost per m2 payback solar",
+                f"{broad_place} solar PV economics electricity tariffs grid carbon intensity",
+                f"{broad_place} feed-in tariff export compensation solar PV",
+            ],
+        ))
+        query_groups.append((
+            "industry-average fallback",
+            [
+                "BIPV installation cost per m2 facade roof industry average",
+                "building integrated photovoltaics payback cost per m2 industry average",
+                "IEA solar PV economics grid carbon intensity electricity industry benchmark",
+            ],
+        ))
+        keywords = [
+            "electricity", "tariff", "price", "kwh", "commercial", "residential",
+            "feed-in", "feed in", "export", "compensation", "remuneration",
+            "grid carbon", "carbon intensity", "emission factor", "co2",
+            "installation cost", "bipv", "photovoltaic", "solar", "payback",
+            "subsidy", "incentive", "rebate", "net metering",
+        ]
+        closing_rule = (
+            "Use these sources only for public economic context. Label whether each useful fact is local, national, regional/continental, or industry-average. Do not infer exact project tariff, export value, "
+            "BIPV cost, subsidy eligibility, or payback unless a source explicitly states it."
+        )
+
+    seen = set()
+    candidates = []
+    source_lines = []
+    used_levels = []
+    for level, queries in query_groups:
+        candidates = []
+        for query in queries:
+            for result in _search_duckduckgo(query, max_results=4):
+                url = result["url"]
+                host = urlparse(url).netloc.lower()
+                if url in seen or any(bad in host for bad in ["facebook", "linkedin", "youtube", "instagram"]):
+                    continue
+                seen.add(url)
+                result["query"] = query
+                result["level"] = level
+                result["score"] = _official_source_score(url)
+                candidates.append(result)
+
+        candidates = sorted(candidates, key=lambda r: r["score"], reverse=True)[:5]
+        for result in candidates:
+            summary = _fetch_public_page_summary(result["url"], keywords=keywords)
+            if not summary:
+                continue
+            source_lines.append(
+                f"- [{result['level']}] {result['title'] or urlparse(result['url']).netloc} ({result['url']}): {summary}"
+            )
+            if result["level"] not in used_levels:
+                used_levels.append(result["level"])
+            if len(source_lines) >= 3:
+                break
+        if source_lines:
+            break
+
+    if not source_lines:
+        return ""
+
+    return "\n".join([
+        label,
+        f"Search location: {place}",
+        f"Search scale used: {', '.join(used_levels) if used_levels else 'none'}",
+        *source_lines,
+        closing_rule,
     ])
 
 
@@ -2105,14 +2447,28 @@ No charts.
 
     if compact_metrics:
         public_context = ""
-        if skill_id == "site-potential--contextual-feasibility--infrastructure-readiness":
+        if skill_id in (
+            "site-potential--contextual-feasibility--infrastructure-readiness",
+            "site-potential--contextual-feasibility--regulatory-constraints",
+            "site-potential--contextual-feasibility--basic-economic-signal",
+        ):
             weather_header = (cea_data.get("files", {}) or {}).get("weather_header", "")
-            context_parts = [
-                regional_infrastructure_context(weather_header),
-                research_public_grid_context(weather_header, skill_id),
-            ]
+            if skill_id == "site-potential--contextual-feasibility--infrastructure-readiness":
+                context_parts = [
+                    regional_infrastructure_context(weather_header),
+                    research_public_grid_context(weather_header, skill_id),
+                ]
+            elif skill_id == "site-potential--contextual-feasibility--regulatory-constraints":
+                context_parts = [
+                    regional_regulatory_context(weather_header),
+                    research_public_contextual_feasibility(weather_header, skill_id),
+                ]
+            else:
+                context_parts = [
+                    research_public_contextual_feasibility(weather_header, skill_id),
+                ]
             public_context = "\n\n".join(part for part in context_parts if part)
-        public_context_block = f"\n## Public grid/context research\n{public_context}\n" if public_context else ""
+        public_context_block = f"\n## Public context research\n{public_context}\n" if public_context else ""
         return f"""You are a BIPV expert helping architects interpret CEA4 simulation results.
 Scale: {scale}{building_context}
 
