@@ -132,7 +132,7 @@
       "status": "complete"
     },
     {
-      "id": "optimize-my-design--panel-type-tradeoff",
+      "id": "performance-estimation--panel-type-tradeoff",
       "display_name": "Panel Type Trade-off",
       "position_in_tree": [
         "Performance Estimation",
