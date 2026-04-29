@@ -1,0 +1,439 @@
+{
+  "generic": {
+    "match": {
+      "countries": [],
+      "keywords": []
+    },
+    "context": [
+      "Exact transformer spare capacity and point-of-connection export limits are usually controlled by the local distribution utility and are often not public at concept stage.",
+      "For early BIPV design, treat grid export as a design constraint rather than a guaranteed benefit."
+    ],
+    "design_implications": [
+      "Keep PV area stageable so roof and facade PV can be reduced, expanded, or connected in phases.",
+      "Prioritise self-consumption when PV peak approaches or exceeds building demand peak.",
+      "Reserve inverter/electrical room space, metering/switchgear space, vertical risers, and accessible maintenance routes early."
+    ],
+    "ask_for_precision": [
+      "point-of-connection export limit in kW",
+      "nearest transformer spare capacity or hosting capacity",
+      "PV connection threshold and application category",
+      "metering, protection, and switchgear requirements",
+      "expected application and approval timeline"
+    ],
+    "sources": []
+  },
+  "switzerland": {
+    "match": {
+      "countries": ["Switzerland", "CHE", "CH"],
+      "keywords": ["zurich", "zürich", "zug", "geneva", "basel", "lausanne", "bern", "switzerland", "schweiz", "suisse"]
+    },
+    "context": [
+      "Grid connection and export approval are handled by the relevant local distribution grid operator, not by CEA.",
+      "Public national context supports reduced or realistic grid-connection sizing for high PV penetration; designing the grid for 100 percent of PV peak can be unnecessarily expensive.",
+      "Exact transformer spare capacity is normally site-specific and should be confirmed with the local utility."
+    ],
+    "design_implications": [
+      "Do not design BIPV only around maximum export; prioritise self-consumption, staged PV zones, and electrical flexibility.",
+      "If PV peak is high relative to demand, protect space for metering/switchgear and possible storage or curtailment-ready controls.",
+      "When heating is district-heating or boiler-based, do not claim BIPV directly decarbonises heating unless the concept adds electric heating or heat pumps."
+    ],
+    "ask_for_precision": [
+      "local DSO point-of-connection export limit in kW",
+      "transformer spare capacity at the nearest secondary substation",
+      "required metering/protection concept for building-integrated PV",
+      "whether reduced connection capacity or export limiting is expected",
+      "feed-in remuneration or reference-price treatment for the project category"
+    ],
+    "sources": [
+      "https://www.swissgrid.ch/en/home/customers/topics/grid-connection.html",
+      "https://www.swissgrid.ch/en/home/newsroom/blog/2026/20260330-01.html"
+    ]
+  },
+  "europe_generic": {
+    "match": {
+      "countries": ["Germany", "France", "Italy", "Spain", "Netherlands", "Austria", "Belgium", "Denmark", "Sweden", "Norway", "Finland"],
+      "keywords": ["europe", "eu", "germany", "france", "italy", "spain", "netherlands", "austria", "belgium", "denmark", "sweden", "norway", "finland"]
+    },
+    "context": [
+      "Distribution grid operators normally control connection approval, export limits, metering, and reinforcement requirements.",
+      "Export compensation and self-consumption rules vary by country and tariff category.",
+      "Exact local hosting capacity is usually grid-node-specific."
+    ],
+    "design_implications": [
+      "Use CEA PV/demand ratios to decide whether the concept should be export-ready, self-consumption-first, or staged.",
+      "Reserve electrical/service space before the facade design becomes fixed.",
+      "Keep visible facade BIPV zones modular so they can be phased if the connection study limits export."
+    ],
+    "ask_for_precision": [
+      "DSO export limit",
+      "connection application category",
+      "metering/protection requirements",
+      "reinforcement cost or timeline risk",
+      "export compensation rule for this building type"
+    ],
+    "sources": []
+  },
+  "united_kingdom": {
+    "match": {
+      "countries": ["United Kingdom", "UK", "Great Britain", "England", "Scotland", "Wales"],
+      "keywords": ["uk", "united kingdom", "great britain", "england", "scotland", "wales", "london", "manchester", "glasgow"]
+    },
+    "context": [
+      "Export payment for eligible small-scale generation in Great Britain is handled through the Smart Export Guarantee, where licensees set tariff terms.",
+      "Grid connection is coordinated through the local Distribution Network Operator. G98, G99, and export-limitation logic such as G100 commonly shape connection routes.",
+      "Connection/export restrictions are project- and network-specific."
+    ],
+    "design_implications": [
+      "For small/simple systems, preserve a straightforward metering and DNO notification route; for larger BIPV areas, assume pre-application coordination may affect PV phasing.",
+      "Keep facade/roof PV zones stageable so the design can respond to DNO export limits.",
+      "Reserve space for export control, metering, and switchgear if PV peak is large relative to demand."
+    ],
+    "ask_for_precision": [
+      "DNO connection route: G98, G99, or larger embedded generation process",
+      "allowed export capacity in kW",
+      "whether export limitation/control is required",
+      "metering requirements for SEG/export payment",
+      "DNO study timeline and likely reinforcement risk"
+    ],
+    "sources": [
+      "https://www.ofgem.gov.uk/environmental-and-social-schemes/smart-export-guarantee-seg"
+    ]
+  },
+  "united_states": {
+    "match": {
+      "countries": ["United States", "USA", "US"],
+      "keywords": ["united states", "usa", "california", "new york", "texas", "florida", "illinois", "washington", "boston", "chicago"]
+    },
+    "context": [
+      "Distributed solar interconnection, net metering, and export compensation vary by state, utility, and tariff.",
+      "State policy databases such as DSIRE and federal resources such as EPA/FERC/NREL help identify interconnection and compensation context, but exact export limits are utility- and feeder-specific.",
+      "Large commercial systems can face interconnection study timelines and utility upgrade requirements."
+    ],
+    "design_implications": [
+      "Do not assume retail net metering or unlimited export; size and phase BIPV around self-consumption unless the utility tariff is known.",
+      "For concept design, reserve electrical/switchgear space and keep PV zones modular for utility interconnection outcomes.",
+      "Where export compensation is weak, prioritise load matching, storage-ready space, and PV surfaces that align with daytime loads."
+    ],
+    "ask_for_precision": [
+      "utility interconnection application category",
+      "state net metering or net billing treatment",
+      "export compensation rate",
+      "allowed export capacity and required protection equipment",
+      "interconnection study timeline and upgrade-cost risk"
+    ],
+    "sources": [
+      "https://www.epa.gov/greenpower/solar-interconnection-standards-policies",
+      "https://www.ferc.gov/generator-interconnection",
+      "https://www.dsireusa.org/net_metering/"
+    ]
+  },
+  "canada": {
+    "match": {
+      "countries": ["Canada", "CAN"],
+      "keywords": ["canada", "ontario", "quebec", "british columbia", "alberta", "toronto", "vancouver", "montreal"]
+    },
+    "context": [
+      "Net metering and interconnection are mainly provincial and utility-specific; there is no single national rule that determines export value for every project.",
+      "The Canadian Electrical Code provides technical grounding, but grid connection requirements are enforced through provincial/utility processes.",
+      "Exact hosting capacity and export limits are project-location-specific."
+    ],
+    "design_implications": [
+      "Keep BIPV zones stageable until the province/utility connection process is known.",
+      "Reserve switchgear/metering and inverter space early, especially for non-residential projects.",
+      "Use self-consumption-first design where export value or connection approval is uncertain."
+    ],
+    "ask_for_precision": [
+      "provincial net metering or net billing rule",
+      "utility interconnection class and export limit",
+      "metering/protection requirements",
+      "transformer or feeder hosting-capacity constraint",
+      "approval timeline"
+    ],
+    "sources": []
+  },
+  "north_america_generic": {
+    "match": {
+      "countries": ["Mexico"],
+      "keywords": ["north america", "mexico"]
+    },
+    "context": [
+      "Grid connection and export compensation are usually controlled by state/province/utility-level rules.",
+      "Exact feeder/transformer hosting capacity is rarely available from building energy simulation data."
+    ],
+    "design_implications": [
+      "Treat export value as uncertain until the local utility rule is known.",
+      "Prioritise self-consumption, PV phasing, inverter-room space, and metering/switchgear allowance."
+    ],
+    "ask_for_precision": [
+      "local utility export and compensation rule",
+      "interconnection application class",
+      "point-of-connection export limit",
+      "metering/protection requirements"
+    ],
+    "sources": []
+  },
+  "australia": {
+    "match": {
+      "countries": ["Australia", "AUS"],
+      "keywords": ["australia", "sydney", "melbourne", "brisbane", "perth", "adelaide", "canberra"]
+    },
+    "context": [
+      "Australia has very high rooftop solar penetration, and export limits are a major grid-integration issue.",
+      "Dynamic operating envelopes can vary import/export limits over time and location instead of using only fixed conservative export caps.",
+      "Network-specific export limits can strongly affect the useful size of rooftop and facade PV."
+    ],
+    "design_implications": [
+      "Design BIPV as self-consumption-first and export-flexible rather than assuming all surplus can be exported.",
+      "Protect space for battery-ready equipment, export-control hardware, and metering/switchgear.",
+      "Prioritise surfaces that align with building loads and reduce midday export peaks if export limits are tight."
+    ],
+    "ask_for_precision": [
+      "network export limit or dynamic operating envelope availability",
+      "connection application class",
+      "battery/export-control requirements",
+      "metering requirements",
+      "whether emergency backstop or flexible export control applies"
+    ],
+    "sources": [
+      "https://arena.gov.au/knowledge-innovation/distributed-energy-integration-program/dynamic-operating-envelopes-workstream/",
+      "https://www.aemo.com.au/learn/energy-explained/fact-sheets/operating-electricity-grids-with-rooftop-solar-installations"
+    ]
+  },
+  "singapore": {
+    "match": {
+      "countries": ["Singapore", "SGP"],
+      "keywords": ["singapore"]
+    },
+    "context": [
+      "Singapore has high solar irradiance and strong public solar deployment targets, but land and roof area are constrained.",
+      "EMA/SP Group payment schemes distinguish consumer categories and embedded solar capacity; excess export can be compensated through defined schemes.",
+      "Dense high-rise and master-sub metering situations can affect whether excess solar can be sold or credited."
+    ],
+    "design_implications": [
+      "Prioritise high-value roof and facade surfaces because usable solar area is scarce.",
+      "Match PV with daytime cooling and common-area loads before relying on export.",
+      "Reserve metering and electrical-room space early, especially for multi-tenant or master-sub arrangements."
+    ],
+    "ask_for_precision": [
+      "contestable or non-contestable consumer status",
+      "applicable EMA/SP Group payment scheme",
+      "whether master-sub metering constrains export or crediting",
+      "metering requirements and SP Group application route",
+      "whether non-exporting registration is preferable"
+    ],
+    "sources": [
+      "https://www.ema.gov.sg/our-energy-story/energy-supply/solar",
+      "https://www.ema.gov.sg/consumer-information/solar/payment-schemes"
+    ]
+  },
+  "japan": {
+    "match": {
+      "countries": ["Japan", "JPN"],
+      "keywords": ["japan", "tokyo", "osaka", "kyoto", "yokohama"]
+    },
+    "context": [
+      "Grid access is managed through formal connection study and grid access rules.",
+      "Japan uses grid-management approaches such as Connect & Manage to allow more renewable connection under congestion management.",
+      "Exact connection capacity and curtailment risk are region and utility specific."
+    ],
+    "design_implications": [
+      "Keep BIPV area and inverter capacity stageable until grid access conditions are known.",
+      "Prioritise self-consumption and load matching where export/curtailment risk is possible.",
+      "Reserve equipment space for protection, metering, and possible export-control requirements."
+    ],
+    "ask_for_precision": [
+      "utility grid access study result",
+      "connection capacity and curtailment conditions",
+      "FIT/FIP or market sale treatment for the project category",
+      "metering/protection requirements",
+      "study timeline"
+    ],
+    "sources": [
+      "https://www.occto.or.jp/en/works/no6-2.html",
+      "https://www.occto.or.jp/en/works/no7.html"
+    ]
+  },
+  "china": {
+    "match": {
+      "countries": ["China", "CHN"],
+      "keywords": ["china", "beijing", "shanghai", "shenzhen", "guangzhou", "hong kong"]
+    },
+    "context": [
+      "Distributed PV is a major national direction, but connection/export rules and incentives are strongly province/city/grid-company specific.",
+      "Industrial and park-scale microgrid approaches are increasingly relevant for local consumption of renewables.",
+      "Exact grid acceptance and export treatment should be checked with the local grid company and local policy."
+    ],
+    "design_implications": [
+      "Prioritise self-consumption and nearby-load matching, especially for industrial, campus, or mixed-use projects.",
+      "Use roof/facade PV zoning that can be phased by local grid approval.",
+      "Reserve space for storage-ready or microgrid-ready equipment when PV area is large."
+    ],
+    "ask_for_precision": [
+      "local grid-company distributed PV connection procedure",
+      "self-consumption/export compensation rule",
+      "province/city incentive or filing requirement",
+      "metering/protection requirements",
+      "whether microgrid or local-consumption rules apply"
+    ],
+    "sources": [
+      "https://en.ndrc.gov.cn/news/mediarusources/202207/t20220729_1332322.html",
+      "https://english.www.gov.cn/news/202601/09/content_WS6960bec3c6d00ca5f9a08816.html"
+    ]
+  },
+  "india": {
+    "match": {
+      "countries": ["India", "IND"],
+      "keywords": ["india", "delhi", "mumbai", "bangalore", "bengaluru", "hyderabad", "chennai", "kolkata"]
+    },
+    "context": [
+      "Rooftop solar support and application routes exist nationally, but net metering, group/virtual metering, approval timelines, and export treatment vary by state and DISCOM.",
+      "DISCOM verification and state rules are central to grid-connected rooftop solar delivery.",
+      "Subsidy and programme eligibility may depend on consumer category and project model."
+    ],
+    "design_implications": [
+      "Identify the building's DISCOM/state rule early before fixing PV area or ownership model.",
+      "For multi-building or apartment projects, consider group or virtual metering possibilities where available.",
+      "Reserve metering/switchgear space and keep PV zones stageable for DISCOM approval."
+    ],
+    "ask_for_precision": [
+      "state/DISCOM net metering, gross metering, group metering, or virtual metering rule",
+      "eligible system size and consumer category",
+      "DISCOM approval pathway and timeline",
+      "metering/protection requirements",
+      "subsidy or programme eligibility"
+    ],
+    "sources": [
+      "https://mnre.gov.in/en/grid-connected-solar-rooftop-programme/"
+    ]
+  },
+  "middle_east_gulf": {
+    "match": {
+      "countries": ["United Arab Emirates", "UAE", "Saudi Arabia", "Qatar", "Kuwait", "Bahrain", "Oman"],
+      "keywords": ["dubai", "abu dhabi", "uae", "saudi", "riyadh", "jeddah", "qatar", "doha", "kuwait", "bahrain", "oman", "muscat", "gulf"]
+    },
+    "context": [
+      "Solar resource is strong, but hot climate raises BIPV operating temperature and cooling-load integration questions.",
+      "Utility-specific schemes dominate. In Dubai, Shams Dubai allows grid-connected PV with surplus credited through DEWA rules, and installed capacity can be limited by connected load and technical grid constraints.",
+      "Inverters and electrical equipment require shaded, ventilated, accessible locations."
+    ],
+    "design_implications": [
+      "Prioritise ventilated BIPV assemblies and avoid trapping heat behind facade modules.",
+      "Match PV production with cooling loads and common-area electrical loads.",
+      "Reserve shaded/ventilated inverter space, metering space, and roof/facade maintenance access."
+    ],
+    "ask_for_precision": [
+      "local utility distributed solar programme and export-credit rule",
+      "capacity limit relative to connected load",
+      "metering requirements and whether generation check-meter is needed",
+      "approved contractor/consultant requirement",
+      "equipment placement and inspection requirements"
+    ],
+    "sources": [
+      "https://www.dewa.gov.ae/en/consumer/solar-community/shams-dubai/shams-dubai-faq",
+      "https://www.dewa.gov.ae/en/shamsdubai"
+    ]
+  },
+  "africa_generic": {
+    "match": {
+      "countries": ["South Africa", "Kenya", "Nigeria", "Egypt", "Morocco", "Ghana", "Ethiopia"],
+      "keywords": ["africa", "south africa", "kenya", "nigeria", "egypt", "morocco", "ghana", "ethiopia", "cape town", "johannesburg", "nairobi", "lagos", "cairo"]
+    },
+    "context": [
+      "Solar policy, grid reliability, and export rules vary strongly by country, utility, and municipality.",
+      "In many contexts, self-consumption, resilience, and backup/storage readiness can be more important than export revenue.",
+      "South Africa has explicit small-scale embedded generation registration distinctions by capacity and grid connection."
+    ],
+    "design_implications": [
+      "Prioritise self-consumption and resilience-ready design before assuming export revenue.",
+      "Reserve battery-ready or hybrid-inverter-ready space where grid reliability is a concept concern.",
+      "Coordinate early with the licensed distributor or municipality for registration, metering, and anti-islanding/protection requirements."
+    ],
+    "ask_for_precision": [
+      "licensed distributor or municipal SSEG registration process",
+      "export permission and compensation rule",
+      "metering/protection requirements",
+      "backup/storage connection requirements",
+      "capacity threshold for simplified registration versus regulator registration"
+    ],
+    "sources": [
+      "https://www.sanews.gov.za/south-africa/nersa-clarifies-small-scale-embedded-generation-regulations"
+    ]
+  },
+  "turkey": {
+    "match": {
+      "countries": ["Turkey", "Türkiye", "TUR"],
+      "keywords": ["turkey", "türkiye", "istanbul", "ankara", "izmir", "antalya"]
+    },
+    "context": [
+      "Unlicensed electricity generation is the main framework relevant to many rooftop/building solar projects, with EPDK listing regulations, application documents, connection/use agreements, and special procedures for solar up to 25 kW.",
+      "Distribution company approval and the licensed versus unlicensed route matter for project feasibility.",
+      "Exact connection capacity is site- and distribution-company-specific."
+    ],
+    "design_implications": [
+      "Check early whether the BIPV concept fits the unlicensed generation route or needs a more complex licensed path.",
+      "Keep PV area and inverter capacity stageable until distribution-company approval is clearer.",
+      "Reserve metering/switchgear space and a clear route for connection equipment."
+    ],
+    "ask_for_precision": [
+      "eligible licensed or unlicensed generation route",
+      "distribution company connection capacity and export treatment",
+      "whether the project qualifies for simplified solar procedures",
+      "required application documents and agreements",
+      "metering/protection requirements"
+    ],
+    "sources": [
+      "https://www.epdk.gov.tr/Detay/Icerik/3-0-92/elektriklisanssiz-ure-",
+      "https://enerji.gov.tr/bilgi-merkezi-enerji-lisanssiz-elektrik-uretimi-en"
+    ]
+  },
+  "russia": {
+    "match": {
+      "countries": ["Russia", "Russian Federation", "RUS"],
+      "keywords": ["russia", "russian federation", "moscow", "saint petersburg"]
+    },
+    "context": [
+      "Microgeneration rules exist for small systems, but the framework is less mature and may not translate well to larger architectural BIPV projects.",
+      "Public summaries indicate microgeneration/export arrangements around small capacities; larger projects require more cautious local legal and utility review.",
+      "Connection practice can be a barrier even where regulation exists."
+    ],
+    "design_implications": [
+      "Frame BIPV first around self-consumption, envelope integration, and resilience rather than export economics.",
+      "Avoid relying on export revenue for concept justification unless local utility approval is confirmed.",
+      "Keep PV systems modular and electrically simple where policy/application risk is high."
+    ],
+    "ask_for_precision": [
+      "whether the project falls under microgeneration or another connection category",
+      "allowed installed/export capacity",
+      "local grid-company connection procedure",
+      "sale/export tariff or retail-market arrangement",
+      "metering/protection requirements"
+    ],
+    "sources": [
+      "https://www.eurosolarrussia.org/en/o-partnerstve/zakonodatelstvo/"
+    ]
+  },
+  "asia_generic": {
+    "match": {
+      "countries": [],
+      "keywords": ["asia", "southeast asia", "east asia", "south asia"]
+    },
+    "context": [
+      "Solar/grid rules vary strongly by country, utility, province, and city.",
+      "Dense urban contexts can make facade and roof area scarce, while grid/export rules can make self-consumption more valuable than maximum export.",
+      "Cooling loads, high temperatures, and monsoon/cloud patterns can affect BIPV design and performance."
+    ],
+    "design_implications": [
+      "Prioritise self-consumption and load matching unless the local export rule is known.",
+      "Use ventilated BIPV assemblies in hot/humid climates to reduce temperature-related performance loss.",
+      "Keep roof/facade PV zones modular and stageable for local utility approval."
+    ],
+    "ask_for_precision": [
+      "local utility/export rule",
+      "connection application category",
+      "metering/protection requirements",
+      "whether virtual/group/net/gross metering is available",
+      "climate-specific equipment and ventilation requirements"
+    ],
+    "sources": []
+  }
+}
