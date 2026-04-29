@@ -1,20 +1,22 @@
 ---
-name: impact-and-viability--carbon-impact--operational-carbon-footprint
-description: Use when the architect wants to understand the operational carbon emissions of their building and how much BIPV reduces them. Reads CEA emissions outputs to show total emissions by source, the carbon offset from BIPV generation, and abated emissions compared to the grid.
-intent: Give the architect a clear picture of their building's operational carbon footprint — what it is, what drives it, and how much BIPV reduces it — in terms that connect directly to sustainability goals and client communication.
-type: component
-position_in_tree: "Goal → Impact and Viability → Carbon Impact → Operational Carbon Footprint"
+name: "impact-and-viability--carbon-impact--carbon-footprint"
+description: "Use when the architect wants to understand the building's electricity-related carbon footprint and how much BIPV reduces it. Uses CEA demand/PV results and grid-carbon data when available."
+intent: "Give the architect a clear picture of the building's carbon footprint from electricity use, the avoided carbon from BIPV generation, and whether BIPV is a strong carbon argument for the project."
+type: "component"
+position_in_tree: "Goal → Impact and Viability → Carbon Impact → Carbon Footprint"
 ---
 
 ## Purpose
 
-Answer the question: **"How do operational carbon emissions look for this building with BIPV?"**
+Answer the question: **"How much carbon footprint does electricity use create here, and how much does BIPV avoid?"**
 
-This skill reads CEA's emissions outputs to present:
-- **Total operational emissions** — what the building emits from heating, cooling, hot water, and electricity
-- **BIPV carbon offset** — how much the BIPV system reduces emissions by replacing grid electricity
-- **Abated emissions vs grid** — how much CO2 the BIPV system avoids compared to drawing everything from the grid
-- **Emissions by source** — which energy sources drive the footprint
+This skill should be concise and non-redundant. It presents:
+- **Baseline electricity carbon footprint** — carbon if the same electricity demand came from the grid
+- **BIPV avoided carbon** — how much carbon the simulated PV generation avoids
+- **Net electricity carbon footprint** — remaining grid-related electricity carbon after BIPV
+- **Carbon argument strength** — whether BIPV is a strong, moderate, or weak carbon story for the concept
+
+Do not repeat Carbon Payback content. This skill is about the annual footprint reduction; Carbon Payback is about how long panels take to offset their own manufacturing carbon.
 
 ---
 
@@ -40,29 +42,25 @@ locator.get_total_yearly_operational()
 
 ## Data Sources
 
-**Primary CEA files accessed via InputLocator:**
+**Primary files used by the app:**
 
 | File | What it provides |
 |------|-----------------|
-| `operational_emissions_annually_buildings.csv` | Annual emissions per building per energy source |
-| `Total_yearly_operational_building.csv` | Annual total emissions per building including PV offsets |
+| `PV_PV{n}_total.csv` and `PV_PV{n}_total_buildings.csv` | PV generation at district/building scale |
+| `B{id}.csv` and demand outputs | electricity demand at building/cluster/district scale |
+| `GRID.csv` | grid carbon factor when available |
 
 **Key columns used:**
-- `E_sys[kgCO2e]` — electricity-related emissions
-- `Qhs_sys[kgCO2e]` — heating emissions
-- `Qww_sys[kgCO2e]` — hot water emissions
-- `Qcs_sys[kgCO2e]` — cooling emissions
-- `GRID[kgCO2e]` — total grid-sourced emissions
-- `PV_PV1_GRID_offset[kgCO2e]` — carbon avoided by BIPV self-consumption (negative value)
-- `PV_PV1_GRID_export[kgCO2e]` — carbon credit from exported electricity (negative value)
+- `E_PV_gen_kWh` — PV electricity generation
+- `E_sys_kWh` — electricity demand
+- `GHG_kgCO2MJ` or similar grid-carbon factor where available
 
 **Derived metrics:**
 ```
-total_operational = E_sys + Qhs_sys + Qww_sys + Qcs_sys (kgCO2e)
-bipv_offset = sum of PV_PV{n}_GRID_offset (kgCO2e) — negative, reduces footprint
-net_emissions = total_operational + bipv_offset
-abatement_rate = bipv_offset / total_operational × 100%
-emissions_per_m2 = net_emissions / GFA_m2 (kgCO2e/m²)
+baseline_electricity_carbon = annual_electricity_demand × grid_carbon
+avoided_carbon = min(PV_generation, electricity_demand) × grid_carbon
+net_electricity_carbon = baseline_electricity_carbon - avoided_carbon
+abatement_rate = avoided_carbon / baseline_electricity_carbon × 100%
 ```
 
 ---
@@ -106,25 +104,25 @@ The LLM reads the project location from the weather file and retrieves the local
 
 ### If "Explain the numbers" selected:
 **What the LLM produces:**
-- Total annual emissions before and after BIPV offset
-- Breakdown by end-use: heating / cooling / hot water / electricity
-- Breakdown by energy source: which fuels drive the footprint
-- BIPV offset per panel type if multiple simulated
-- Emissions per m² of floor area vs benchmark
-- Grid carbon intensity context from project location
+- Baseline electricity carbon footprint
+- BIPV avoided carbon
+- Net electricity carbon footprint after BIPV
+- Abatement rate in %
+- Grid carbon factor used and whether it came from project data or fallback context
+- Keep this as a compact table plus one short interpretation paragraph.
 
-**Visualization:** Stacked bar chart — emissions breakdown
-- One bar: total emissions by end-use (heating/cooling/hot water/electricity)
-- Second bar: net emissions after BIPV offset shown as reduction
-- Clear visual of how much BIPV cuts the footprint
+**Visualization:** Before/after carbon footprint chart
+- Baseline grid-electricity carbon
+- BIPV avoided carbon shown as a reduction
+- Net electricity carbon after BIPV
 
 ---
 
 ### If "Key takeaway" selected:
 **What the LLM produces:**
-- One headline: "Your building emits X tCO2e/year — BIPV reduces this by Y% to Z tCO2e"
-- One sentence on dominant emission source
-- One sentence on BIPV's carbon contribution in context
+- One headline: "BIPV reduces electricity-related carbon by X tCO2e/year, about Y% of the building's electricity footprint."
+- One sentence on whether this is a strong, moderate, or weak carbon argument.
+- One design/client implication.
 
 **Visualization:** Before/after emissions comparison
 - Two simple bars: with and without BIPV
@@ -135,12 +133,10 @@ The LLM reads the project location from the weather file and retrieves the local
 
 ### If "Design implication" selected:
 **What the LLM produces:**
-- Assessment of whether BIPV makes a meaningful carbon argument for this project
-- If grid is carbon-intensive: strong carbon case — lead with emissions reduction
-- If grid is already clean: weaker carbon case — energy independence or economic argument may be stronger
-- Recommendation on which end-use to target for greatest carbon reduction (usually cooling in hot climates)
-- Links to Carbon Payback skill for full lifecycle picture
-- Links to Basic Economic Signal for grid carbon intensity context
+- Assessment of whether BIPV makes a meaningful annual carbon argument for this project.
+- If avoided carbon is high: lead with emissions reduction in the client narrative.
+- If avoided carbon is low because the grid is clean or PV generation is small: lead with energy independence, regulation, economics, or architectural integration instead.
+- Keep this mode focused on design and client framing, not payback years.
 
 **Visualization:** Carbon reduction waterfall chart
 - Shows: baseline emissions → BIPV self-consumption offset → BIPV export credit → net emissions
@@ -152,7 +148,8 @@ The LLM reads the project location from the weather file and retrieves the local
 
 - **PV offset values are negative:** CEA correctly reports BIPV offsets as negative kgCO2e — they reduce the footprint. Always present these as reductions, not additions.
 - **Grid carbon intensity changes over time:** In long-term scenarios (e.g. 2060), the grid may be much cleaner — reducing the carbon argument for BIPV. The LLM flags this for future-scenario projects.
-- **Operational emissions only:** This skill covers operational emissions only — not embodied carbon of the building structure or PV panels. That is covered by the Carbon Payback skill.
+- **Electricity carbon only unless emissions files are supplied:** Do not imply full building operational carbon if only PV/demand/grid-carbon data are available.
+- **Carbon Payback is separate:** Do not discuss how many years panels take to offset manufacturing carbon here.
 - **Cooling dominance in hot climates:** In Shanghai and similar climates, cooling emissions typically dominate the operational footprint. The LLM frames this in context.
 
 ---
