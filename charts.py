@@ -428,27 +428,66 @@ def chart_energy_generation(cea_data, selected_buildings, output_mode):
         return monthly_bar
 
     if output_mode == "Design implication":
-        # Surface contribution from buildings file
+        # Surface contribution from buildings file: roof/facade share of total PV generation
         bldg_fname = pv_fname.replace("_total.csv", "_total_buildings.csv")
         df_b = cea_data["files"].get(bldg_fname)
         name_col = _find_col(df_b, "name", "Name") if df_b is not None else None
         gen_b_col = _find_col(df_b, "E_PV_gen", "E_PV") if df_b is not None else None
 
-        if df_b is not None and name_col and gen_b_col:
+        if df_b is not None:
             if selected_buildings:
-                df_b = df_b[df_b[name_col].isin(selected_buildings)]
+                if name_col:
+                    df_b = df_b[df_b[name_col].isin(selected_buildings)]
             df_b = df_b.copy()
-            df_b["annual_MWh"] = df_b[gen_b_col] / 1000
-            donut = alt.Chart(df_b.nlargest(8, gen_b_col)).mark_arc(
-                innerRadius=50
-            ).encode(
-                theta=alt.Theta("annual_MWh:Q"),
-                color=alt.Color(f"{name_col}:N",
-                                scale=alt.Scale(scheme="goldorange")),
-                tooltip=[name_col, alt.Tooltip("annual_MWh:Q", format=".1f",
-                                               title="MWh/yr")]
-            ).properties(title="Generation share by building", height=220)
-            return monthly_bar | donut
+
+            surface_cols = [
+                ("Roof", "PV_roofs_top_E_kWh"),
+                ("South facade", "PV_walls_south_E_kWh"),
+                ("East facade", "PV_walls_east_E_kWh"),
+                ("West facade", "PV_walls_west_E_kWh"),
+                ("North facade", "PV_walls_north_E_kWh"),
+            ]
+            rows = []
+            for surface, col in surface_cols:
+                if col in df_b.columns:
+                    kwh = pd.to_numeric(df_b[col], errors="coerce").fillna(0).sum()
+                    if kwh > 0:
+                        rows.append({"Surface": surface, "Generation (MWh)": kwh / 1000})
+
+            if rows:
+                df_surface = pd.DataFrame(rows)
+                total = df_surface["Generation (MWh)"].sum()
+                df_surface["Share"] = df_surface["Generation (MWh)"] / total
+                surface_order = [r[0] for r in surface_cols]
+                color_range = [C_PV, C_SURPLUS, "#e8b86d", "#a8d5b5", C_NEUTRAL]
+
+                donut = alt.Chart(df_surface).mark_arc(innerRadius=48).encode(
+                    theta=alt.Theta("Generation (MWh):Q"),
+                    color=alt.Color(
+                        "Surface:N",
+                        scale=alt.Scale(domain=surface_order, range=color_range),
+                        legend=alt.Legend(title="Surface")
+                    ),
+                    tooltip=[
+                        "Surface",
+                        alt.Tooltip("Generation (MWh):Q", format=".1f", title="MWh/yr"),
+                        alt.Tooltip("Share:Q", format=".1%", title="Share")
+                    ]
+                ).properties(title="PV generation share by surface", height=220)
+                return monthly_bar | donut
+
+            if name_col and gen_b_col:
+                df_b["annual_MWh"] = df_b[gen_b_col] / 1000
+                donut = alt.Chart(df_b.nlargest(8, gen_b_col)).mark_arc(
+                    innerRadius=50
+                ).encode(
+                    theta=alt.Theta("annual_MWh:Q"),
+                    color=alt.Color(f"{name_col}:N",
+                                    scale=alt.Scale(scheme="goldorange")),
+                    tooltip=[name_col, alt.Tooltip("annual_MWh:Q", format=".1f",
+                                                   title="MWh/yr")]
+                ).properties(title="Generation share by building", height=220)
+                return monthly_bar | donut
 
         return monthly_bar
 
