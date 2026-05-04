@@ -2656,7 +2656,7 @@ def render_pv_coverage_scenario_tool(cea_data, selected_buildings=None):
 
     html_block = f"""
     <style>
-      * {{ font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; box-sizing:border-box; }}
+      .scenario-wrap, .scenario-wrap * {{ font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; box-sizing:border-box; }}
       .scenario-wrap {{ display:grid; grid-template-columns: 1fr 1fr; gap:22px; align-items:center; margin-top:12px; background:white; }}
       .scenario-building {{ background:white; border:1px solid #e0dcd4; border-radius:8px; padding:22px; min-height:310px; display:flex; align-items:center; justify-content:center; }}
       .building-face {{ width:270px; height:235px; background:#b8bbc0; border:2px solid #8d9095; display:grid; grid-template-columns:repeat(6, 1fr); grid-template-rows:repeat(4, 1fr); gap:8px; padding:14px; }}
@@ -2671,6 +2671,8 @@ def render_pv_coverage_scenario_tool(cea_data, selected_buildings=None):
     <div class="scenario-wrap">
       <div class="scenario-building"><div class="building-face">{''.join(cells)}</div></div>
       <div class="scenario-metrics">
+        <div class="metric-box"><div class="metric-label">Facade coverage</div><div class="metric-value">{coverage:.0f}%</div></div>
+        <div class="metric-box"><div class="metric-label">Facade PV area</div><div class="metric-value">{_format_number(values['facade_area_m2'], ' m2', 1)}</div></div>
         <div class="metric-box"><div class="metric-label">Active PV area</div><div class="metric-value">{_format_number(values['active_area_m2'], ' m2', 1)}</div></div>
         <div class="metric-box"><div class="metric-label">PV generation</div><div class="metric-value">{_format_number(values['scenario_pv_kwh'], ' kWh/yr')}</div></div>
         <div class="metric-box"><div class="metric-label">Self-sufficiency</div><div class="metric-value">{_format_number(values['self_sufficiency_pct'], '%', 1)}</div></div>
@@ -2680,7 +2682,7 @@ def render_pv_coverage_scenario_tool(cea_data, selected_buildings=None):
       </div>
     </div>
     """
-    components.html(html_block, height=390)
+    st.markdown(html_block, unsafe_allow_html=True)
     st.caption("The roof PV remains at 100% of the CEA simulated roof PV area. The slider only scales the CEA simulated facade PV area; it does not assume the whole physical facade is coverable.")
 
     if st.button("Save this scenario for Design Integration Recipe", type="primary"):
@@ -4793,3 +4795,4 @@ else:
                     response = call_llm(system_prompt, recent_history)
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
                 st.rerun()
+
