@@ -261,6 +261,63 @@ def capital_recovery_factor(discount_rate: float = DISCOUNT_RATE, lifetime: int 
     return (i * (1 + i) ** lt) / ((1 + i) ** lt - 1)
 
 
+def solar_resource_benchmark_band(annual_ghi_kwh_m2: float | None) -> dict:
+    """
+    Location-specific practical band for annual-radiation-threshold.
+
+    Annual GHI describes the available solar resource before orientation,
+    shading and facade tilt losses. The band keeps the threshold in a range
+    that is neither so low that very weak surfaces pass, nor so high that facade
+    BIPV disappears in moderate-resource locations.
+    """
+    ghi = _safe_float(annual_ghi_kwh_m2)
+    if ghi is None or ghi <= 0:
+        return {
+            "annual_ghi_kwh_m2": None,
+            "lower": 500,
+            "upper": FACADE_EMPTY_RISK_THRESHOLD,
+            "basis": "fallback band: annual GHI unavailable",
+        }
+
+    lower = max(350, 0.45 * ghi)
+    upper = max(lower + 150, 0.70 * ghi)
+    lower = min(lower, 900)
+    upper = min(max(upper, FACADE_EMPTY_RISK_THRESHOLD), 1400)
+    return {
+        "annual_ghi_kwh_m2": round(ghi, 1),
+        "lower": round(lower / 10) * 10,
+        "upper": round(upper / 10) * 10,
+        "basis": "45-70% of annual GHI, bounded for practical facade screening",
+    }
+
+
+def _resolve_threshold_with_solar_band(carbon_value: float | None, economic_value: float | None, band: dict) -> tuple[float | None, str]:
+    """
+    Resolve carbon and LCOE thresholds against the local solar-resource band.
+
+    Rule:
+    - if either carbon or LCOE falls below the lower benchmark, use the lower benchmark
+    - only if both carbon and LCOE are above the upper benchmark, use the upper benchmark
+    - otherwise use the value that sits inside the benchmark band
+    """
+    lower = band.get("lower")
+    upper = band.get("upper")
+    if lower is None or upper is None:
+        return carbon_value if carbon_value is not None else economic_value, "unbounded"
+
+    values = [v for v in [carbon_value, economic_value] if v is not None]
+    if not values:
+        return None, "unavailable"
+    if any(v < lower for v in values):
+        return lower, "lower_benchmark"
+    if all(v > upper for v in values):
+        return upper, "upper_benchmark"
+    for v in values:
+        if lower <= v <= upper:
+            return v, "within_benchmark"
+    return min(max(values[0], lower), upper), "bounded"
+
+
 def _surface_weighted_cost(panel_type: str, economic_inputs: dict | None = None) -> tuple[float, str]:
     """
     Estimate local installed BIPV cost for this panel type.
@@ -524,19 +581,34 @@ def get_threshold_check(weather_header: str, cea_default: float = 800, self_cons
     valid_selected = [p for p in selected_panels if thresholds.get(p) is not None]
     threshold_basis = "carbon_parity"
     fallback_reason = None
+    benchmark_band = solar_resource_benchmark_band(economic_inputs.get("annual_ghi_kwh_m2"))
     if valid_selected:
         recommended_panel, panel_selection = select_best_panel(valid_selected, threshold_details)
-        recommended = thresholds[recommended_panel]
-        if recommended is not None and recommended > FACADE_EMPTY_RISK_THRESHOLD:
+        carbon_value = thresholds[recommended_panel]
+        recommended = carbon_value
+        outside_solar_band = (
+            carbon_value is not None
+            and (
+                carbon_value < benchmark_band["lower"]
+                or carbon_value > benchmark_band["upper"]
+            )
+        )
+        if outside_solar_band:
             economic_value = threshold_details[recommended_panel].get("economic_threshold")
             if economic_value is not None:
+                side = "below" if carbon_value < benchmark_band["lower"] else "above"
+                resolved_value, resolved_basis = _resolve_threshold_with_solar_band(
+                    carbon_value, economic_value, benchmark_band
+                )
                 fallback_reason = (
                     f"The best overall PV option is {recommended_panel}. Its carbon-parity threshold "
-                    f"{recommended:.0f} kWh/m2/year is above {FACADE_EMPTY_RISK_THRESHOLD} kWh/m2/year, "
-                    "so facade BIPV may be screened out in early design."
+                    f"{carbon_value:.0f} kWh/m2/year is {side} the location-specific solar-resource "
+                    f"benchmark band ({benchmark_band['lower']:.0f}-{benchmark_band['upper']:.0f} kWh/m2/year). "
+                    f"The LCOE value is {economic_value:.0f} kWh/m2/year, so the displayed value follows "
+                    f"the solar-band resolution rule: {resolved_basis}."
                 )
-                recommended = economic_value
-                threshold_basis = "economic_lcoe_fallback"
+                recommended = resolved_value
+                threshold_basis = f"solar_band_{resolved_basis}"
     else:
         recommended_panel = DEFAULT_PANEL
         recommended = cea_default
@@ -560,6 +632,7 @@ def get_threshold_check(weather_header: str, cea_default: float = 800, self_cons
         "recommended_panel": recommended_panel,
         "threshold_basis": threshold_basis,
         "fallback_reason": fallback_reason,
+        "solar_resource_benchmark": benchmark_band,
         "panel_selection": panel_selection,
         "thresholds_by_panel": thresholds,
         "threshold_details_by_panel": threshold_details,
