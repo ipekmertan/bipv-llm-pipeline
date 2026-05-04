@@ -276,6 +276,30 @@ def _read_geometry_table(shp_path):
     return pd.DataFrame(rows) if rows else None
 
 
+def _annual_ghi_from_epw(epw_path):
+    """Return annual global horizontal irradiation from EPW in kWh/m2/year."""
+    total_wh_m2 = 0.0
+    count = 0
+    try:
+        with open(epw_path, "r", errors="ignore") as f:
+            for line_no, line in enumerate(f):
+                if line_no < 8:
+                    continue
+                parts = line.strip().split(",")
+                if len(parts) <= 13:
+                    continue
+                try:
+                    ghi = float(parts[13])
+                except (TypeError, ValueError):
+                    continue
+                if ghi >= 0:
+                    total_wh_m2 += ghi
+                    count += 1
+    except Exception:
+        return None
+    return round(total_wh_m2 / 1000, 1) if count else None
+
+
 def extract_cea_zip(uploaded_file):
     result = {"files": {}, "available_simulations": [], "errors": []}
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -368,6 +392,9 @@ def extract_cea_zip(uploaded_file):
             try:
                 with open(epw, "r", errors="ignore") as f:
                     result["files"]["weather_header"] = f.readline().strip()
+                annual_ghi = _annual_ghi_from_epw(epw)
+                if annual_ghi is not None:
+                    result["files"]["weather_annual_ghi_kwh_m2"] = annual_ghi
             except: pass
 
         sims = []
@@ -3391,6 +3418,7 @@ def build_threshold_economic_inputs(weather_header, cea_data):
         "panel_on_wall": pv_config.get("panel_on_wall"),
         "pv_areas_by_panel": pv_areas_by_panel,
         "pv_performance_by_panel": pv_performance_by_panel,
+        "annual_ghi_kwh_m2": files.get("weather_annual_ghi_kwh_m2"),
         "currency": "EUR",
         "currency_symbol": "€",
         "electricity_price_kwh": electricity_price,
@@ -4068,6 +4096,10 @@ def render_parameter_check(threshold_result, skill_id):
     threshold_basis = threshold_result.get("threshold_basis", "carbon_parity")
     fallback_reason = threshold_result.get("fallback_reason")
     fallback_limit = threshold_result.get("facade_empty_risk_threshold", 800)
+    solar_band = threshold_result.get("solar_resource_benchmark", {})
+    band_lower = solar_band.get("lower", 500)
+    band_upper = solar_band.get("upper", fallback_limit)
+    annual_ghi = solar_band.get("annual_ghi_kwh_m2")
 
     if len(run_pv_types) == 1:
         sim_label = f'Photovoltaic simulation<br><span style="font-size:11px;color:#999;">{run_pv_types[0]} — {PV_PANEL_TYPES.get(run_pv_types[0], {}).get("description", "")}</span>'
@@ -4087,12 +4119,28 @@ def render_parameter_check(threshold_result, skill_id):
     else:
         panel_intro = f'This first selects the <b>best overall simulated PV option</b>, <b>{recommended_panel}</b>, then checks it for {city}, {country}.'
 
-    if threshold_basis == "economic_lcoe_fallback":
+    is_solar_band_resolution = threshold_basis.startswith("solar_band_")
+    is_lcoe_fallback = threshold_basis in ("economic_lcoe_fallback", "economic_lcoe_bounded_fallback") or is_solar_band_resolution
+
+    if is_lcoe_fallback:
+        carbon_position = "outside"
+        if carbon_parity is not None:
+            carbon_position = "below" if carbon_parity < band_lower else "above"
+        ghi_text = f" from annual GHI {annual_ghi:,.0f} kWh/m²/year" if annual_ghi else ""
+        if threshold_basis == "solar_band_lower_benchmark":
+            resolution_note = f' Because at least one threshold falls below the lower benchmark, the displayed value is the lower benchmark.'
+        elif threshold_basis == "solar_band_upper_benchmark":
+            resolution_note = f' Because both thresholds are above the upper benchmark, the displayed value is the upper benchmark.'
+        elif is_solar_band_resolution:
+            resolution_note = f' The displayed value follows the solar-resource benchmark resolution rule.'
+        else:
+            resolution_note = ""
         info_text = (
             f'{panel_intro} Its carbon threshold is {int(carbon_parity)} kWh/m&#x00B2;/year, '
-            f'which is above the {int(fallback_limit)} kWh/m&#x00B2;/year facade-screening limit. '
-            f'The displayed value therefore falls back to its LCOE threshold: '
-            f'<b>{int(economic_threshold)} kWh/m&#x00B2;/year</b>.'
+            f'which is {carbon_position} the location-specific solar-resource band '
+            f'{int(band_lower)}–{int(band_upper)} kWh/m&#x00B2;/year{ghi_text}. '
+            f'The LCOE threshold is {int(economic_threshold)} kWh/m&#x00B2;/year. '
+            f'The displayed recommendation is <b>{int(recommended)} kWh/m&#x00B2;/year</b>.{resolution_note}'
         )
     else:
         info_text = (
@@ -4108,8 +4156,8 @@ def render_parameter_check(threshold_result, skill_id):
     for col, label in zip([h1, h2, h3, h4], ["Simulation", "Parameter", "Recommended value", "Info"]):
         with col:
             cost_sentence = (
-                'Because the carbon threshold exceeded the facade-screening limit, LCOE is used only as a fallback display value here.<br><br>'
-                if threshold_basis == "economic_lcoe_fallback"
+                'Carbon and LCOE are checked against the local solar-resource benchmark band before showing the final value.<br><br>'
+                if is_lcoe_fallback
                 else 'Cost/LCOE can be treated in the economic prompts, but it is not used as the main radiation-threshold value here.<br><br>'
             )
             st.markdown(
@@ -4125,7 +4173,7 @@ def render_parameter_check(threshold_result, skill_id):
     with c2:
         st.markdown("`annual-radiation-threshold`")
     with c3:
-        tooltip_basis = "LCOE fallback" if threshold_basis == "economic_lcoe_fallback" else "carbon-parity"
+        tooltip_basis = "solar-band resolved" if is_solar_band_resolution else ("LCOE fallback" if is_lcoe_fallback else "carbon-parity")
         tooltip = f"Calculated {tooltip_basis} threshold for {recommended_panel}; CEA default reference is {int(cea_reference)} kWh/m²/year"
         bg, border = "#f0fff4", "#b2dfdb"
         st.markdown(
@@ -4175,14 +4223,24 @@ def render_parameter_check(threshold_result, skill_id):
             cpp10_val = recommended_detail.get("carbon_payback_10yr_threshold")
             economic_val = recommended_detail.get("economic_threshold")
             carbon_val = recommended_detail.get("carbon_parity_threshold")
-            if threshold_basis == "economic_lcoe_fallback":
+            if is_lcoe_fallback:
+                carbon_position = "below" if carbon_val < band_lower else "above"
+                ghi_text = f" Annual GHI from the weather file is {annual_ghi:,.0f} kWh/m&sup2;/year." if annual_ghi else ""
+                if threshold_basis == "solar_band_lower_benchmark":
+                    rule_text = "At least one threshold is below the lower benchmark, so the lower benchmark is used."
+                elif threshold_basis == "solar_band_upper_benchmark":
+                    rule_text = "Both thresholds are above the upper benchmark, so the upper benchmark is used."
+                elif is_solar_band_resolution:
+                    rule_text = "One threshold sits inside the benchmark band, so that value is used."
+                else:
+                    rule_text = "The LCOE fallback value is used."
                 threshold_explanation = (
                     f'<strong>Best overall PV option:</strong> {recommended_panel}. '
                     f'Its carbon-parity threshold is <strong>{int(carbon_val)} kWh/m&sup2;/year</strong>, '
-                    f'which is above the <strong>{int(fallback_limit)} kWh/m&sup2;/year</strong> facade-screening limit. '
-                    f'The app therefore shows its LCOE fallback threshold instead: '
-                    f'<strong>{int(economic_val)} kWh/m&sup2;/year</strong>. This keeps facade BIPV visible for early design, '
-                    f'while making clear that the carbon-only target is stricter.'
+                    f'which is {carbon_position} the location-specific solar-resource benchmark band '
+                    f'<strong>{int(band_lower)}–{int(band_upper)} kWh/m&sup2;/year</strong>.{ghi_text} '
+                    f'Its LCOE threshold is <strong>{int(economic_val)} kWh/m&sup2;/year</strong>. '
+                    f'{rule_text} Final displayed value: <strong>{int(recommended)} kWh/m&sup2;/year</strong>.'
                 )
             else:
                 threshold_explanation = (
@@ -4197,7 +4255,8 @@ def render_parameter_check(threshold_result, skill_id):
                 f'padding:12px 14px;margin-top:8px;font-size:12px;color:#555;line-height:1.7;">'
                 f'Happle et al. define the threshold by comparing PV life-cycle carbon intensity with the local grid. '
                 f'McCarty et al. show that this threshold changes strongly by grid carbon intensity and PV technology; '
-                f'cost/LCOE is a separate economic target, not the main carbon-screening value.<br><br>'
+                f'cost/LCOE is a separate economic target. The app first checks whether the carbon result sits inside the '
+                f'location-specific solar-resource band, then falls back to LCOE if it does not.<br><br>'
                 f'<strong>Formula used for the displayed value:</strong> threshold = embodied carbon / '
                 f'(grid carbon × efficiency × PR × lifetime).<br>'
                 f'{threshold_explanation}<br>'
