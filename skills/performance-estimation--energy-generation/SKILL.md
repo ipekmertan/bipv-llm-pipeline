@@ -162,13 +162,12 @@ This skill reads from the uploaded CEA project zip. The app finds the relevant f
 
 ## Radiation Threshold — Parameter Check Context
 
-The `annual-radiation-threshold` in CEA determines which surfaces are included in the PV simulation. The app's parameter check computes the recommended threshold per panel type using:
+The `annual-radiation-threshold` in CEA determines which surfaces are included in the PV simulation. The app's parameter check computes a project-specific carbon threshold using Happle et al. (2019) and McCarty et al. (2025):
 
-`I_threshold = EmBIPV / (em_grid × η × PR × LT)` (Happle et al. 2019), capped between 800–1200 kWh/m²/year.
+`I_threshold = EmBIPV / (Gridem × η × PR × lifetime)`
 
-Embodied carbon values (kgCO₂/m²) are read directly from the project's `PHOTOVOLTAIC_PANELS.csv`:
-- PV1 (cSi): 255.8 — PV2 (mcSi): 191.2 — PV3 (CdTe): 47.6 — PV4 (CIGS): 75.9
+The calculation uses local grid carbon intensity, selected PV type embodied carbon, PV type efficiency, PR = 0.75 and lifetime = 25 years unless a project-specific value is supplied. The stricter 10-year carbon payback threshold is shown as context where useful.
 
-When multiple panel types are run together, CEA applies **one threshold to all**. The parameter check shows the recommended threshold per panel type and advises setting it to the highest value among the simulated types, or running separately per type.
+When multiple panel types are run together, CEA applies one threshold to all. The parameter check first identifies the best overall simulated PV option from actual generation, lifetime carbon intensity, and installed cost, then applies the carbon threshold to that option. If that option's carbon threshold is above the facade-screening limit, the app shows an LCOE fallback threshold so early-design facade potential is not erased.
 
-**Sources:** Happle et al. (2019). J. Phys.: Conf. Ser. 1343, 012077. · Galimshina et al. (2024). Renewable Energy 236, 121404. · McCarty et al. (2025). Renew. Sustain. Energy Rev. 211, 115326.
+**Sources:** Happle et al. (2019). J. Phys.: Conf. Ser. 1343, 012077. · McCarty et al. (2025). J. Phys.: Conf. Ser. 3140, 032006. · CEA Learning Camp PV panel threshold workflow.
