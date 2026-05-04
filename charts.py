@@ -14,6 +14,8 @@ C_SURPLUS  = "#7ec8a0"   # soft green — surplus / benefit
 C_CARBON   = "#e07b5a"   # terracotta — carbon / cost
 C_NEUTRAL  = "#a0a0a0"   # grey — secondary series
 C_GRID     = "#e0dcd4"   # light — grid lines
+C_SURPLUS_YELLOW = "#f2c94c"  # bright yellow — surplus / export
+C_DEFICIT_GREY   = "#8a8f98"  # readable grey — deficit / import
 
 MONTHS = ["Jan","Feb","Mar","Apr","May","Jun",
           "Jul","Aug","Sep","Oct","Nov","Dec"]
@@ -65,6 +67,104 @@ def _monthly_from_hourly(df, col):
         return monthly.reindex(range(1, 13), fill_value=0)
     except Exception:
         return None
+
+
+def _pv_surface_generation_rows(cea_data, pv_fname, selected_buildings=None):
+    """Return annual PV generation by roof and facade orientation from *_total_buildings.csv."""
+    bldg_fname = pv_fname.replace("_total.csv", "_total_buildings.csv")
+    df_b = cea_data["files"].get(bldg_fname)
+    if df_b is None or df_b.empty:
+        return []
+    df_b = df_b.copy()
+    name_col = _find_col(df_b, "name", "Name", "building")
+    if selected_buildings and name_col:
+        df_b = df_b[df_b[name_col].isin(selected_buildings)]
+    if df_b.empty:
+        return []
+
+    surface_cols = [
+        ("Roof", "Roof", "PV_roofs_top_E_kWh"),
+        ("Facade", "South facade", "PV_walls_south_E_kWh"),
+        ("Facade", "East facade", "PV_walls_east_E_kWh"),
+        ("Facade", "West facade", "PV_walls_west_E_kWh"),
+        ("Facade", "North facade", "PV_walls_north_E_kWh"),
+    ]
+    rows = []
+    for group, surface, col in surface_cols:
+        if col in df_b.columns:
+            kwh = pd.to_numeric(df_b[col], errors="coerce").fillna(0).sum()
+            if kwh > 0:
+                rows.append({"Group": group, "Surface": surface, "kWh": float(kwh), "MWh": float(kwh) / 1000})
+    return rows
+
+
+def _pv_surface_pie_chart(cea_data, pv_fname, selected_buildings=None):
+    rows = _pv_surface_generation_rows(cea_data, pv_fname, selected_buildings)
+    if not rows:
+        return None
+    df_surface = pd.DataFrame(rows)
+    total_mwh = float(df_surface["MWh"].sum())
+    if total_mwh <= 0:
+        return None
+
+    df_group = df_surface.groupby("Group", as_index=False)["MWh"].sum()
+    df_group["Share"] = df_group["MWh"] / total_mwh
+    roof_mwh = float(df_group.loc[df_group["Group"] == "Roof", "MWh"].sum())
+    facade_mwh = float(df_group.loc[df_group["Group"] == "Facade", "MWh"].sum())
+
+    group_pie = alt.Chart(df_group).mark_arc(outerRadius=90, innerRadius=28).encode(
+        theta=alt.Theta("MWh:Q"),
+        color=alt.Color(
+            "Group:N",
+            scale=alt.Scale(domain=["Roof", "Facade"], range=[C_PV, C_SURPLUS]),
+            legend=alt.Legend(title="PV yield")
+        ),
+        tooltip=[
+            alt.Tooltip("Group:N"),
+            alt.Tooltip("MWh:Q", title="MWh/year", format=",.1f"),
+            alt.Tooltip("Share:Q", title="Share", format=".1%")
+        ]
+    ).properties(title="Roof vs facade PV yield", width=250, height=240)
+
+    total_label = alt.Chart(pd.DataFrame({
+        "x": [0], "y": [0],
+        "text": [f"Total: {total_mwh:,.1f} MWh/year"]
+    })).mark_text(align="center", baseline="middle", dy=108, fontSize=13, fontWeight="bold", color=C_DEMAND).encode(
+        x=alt.value(125), y=alt.value(120), text="text:N"
+    )
+    group_chart = group_pie + total_label
+
+    df_facade = df_surface[df_surface["Group"] == "Facade"].copy()
+    if df_facade.empty or facade_mwh <= 0:
+        return group_chart
+    df_facade["Share"] = df_facade["MWh"] / facade_mwh
+    facade_order = ["South facade", "East facade", "West facade", "North facade"]
+    facade_pie = alt.Chart(df_facade).mark_arc(outerRadius=72, innerRadius=18).encode(
+        theta=alt.Theta("MWh:Q"),
+        color=alt.Color(
+            "Surface:N",
+            scale=alt.Scale(domain=facade_order, range=[C_SURPLUS, "#e8b86d", "#a8d5b5", C_NEUTRAL]),
+            legend=alt.Legend(title="Facade yield")
+        ),
+        tooltip=[
+            alt.Tooltip("Surface:N"),
+            alt.Tooltip("MWh:Q", title="MWh/year", format=",.1f"),
+            alt.Tooltip("Share:Q", title="Facade share", format=".1%")
+        ]
+    ).properties(title="Facade yield distribution", width=220, height=240)
+
+    connector_df = pd.DataFrame({
+        "x": [0, 1, 0, 1],
+        "y": [0.42, 0.35, 0.58, 0.65],
+        "line": ["top", "top", "bottom", "bottom"]
+    })
+    connectors = alt.Chart(connector_df).mark_line(color=C_GRID, strokeWidth=1.5).encode(
+        x=alt.X("x:Q", axis=None, scale=alt.Scale(domain=[0, 1])),
+        y=alt.Y("y:Q", axis=None, scale=alt.Scale(domain=[0, 1])),
+        detail="line:N"
+    ).properties(width=65, height=200)
+
+    return group_chart | connectors | facade_pie
 
 
 # ── Chart builders ────────────────────────────────────────────────────────────
@@ -400,6 +500,8 @@ def chart_energy_generation(cea_data, selected_buildings, output_mode):
         return None
     monthly = monthly * pv_scale
 
+    surface_pie = _pv_surface_pie_chart(cea_data, pv_fname, selected_buildings)
+
     df_monthly = pd.DataFrame({
         "Month": MONTHS, "Generation (MWh)": monthly.values
     })
@@ -414,7 +516,7 @@ def chart_energy_generation(cea_data, selected_buildings, output_mode):
     ).properties(title="Monthly PV generation", height=200)
 
     if output_mode == "Key takeaway":
-        return monthly_bar
+        return surface_pie if surface_pie is not None else monthly_bar
 
     if output_mode == "Explain the numbers":
         # Add daily profile
@@ -436,10 +538,12 @@ def chart_energy_generation(cea_data, selected_buildings, output_mode):
                     y=alt.Y("Avg generation (MWh):Q", title="MWh (avg)"),
                     tooltip=["Hour", alt.Tooltip("Avg generation (MWh):Q", format=".2f")]
                 ).properties(title="Average daily generation profile", height=200)
+                if surface_pie is not None:
+                    return surface_pie & (monthly_bar | profile)
                 return monthly_bar | profile
             except Exception:
                 pass
-        return monthly_bar
+        return (surface_pie & monthly_bar) if surface_pie is not None else monthly_bar
 
     if output_mode == "Design implication":
         # Surface contribution from buildings file: roof/facade share of total PV generation
@@ -475,20 +579,8 @@ def chart_energy_generation(cea_data, selected_buildings, output_mode):
                 surface_order = [r[0] for r in surface_cols]
                 color_range = [C_PV, C_SURPLUS, "#e8b86d", "#a8d5b5", C_NEUTRAL]
 
-                donut = alt.Chart(df_surface).mark_arc(innerRadius=48).encode(
-                    theta=alt.Theta("Generation (MWh):Q"),
-                    color=alt.Color(
-                        "Surface:N",
-                        scale=alt.Scale(domain=surface_order, range=color_range),
-                        legend=alt.Legend(title="Surface")
-                    ),
-                    tooltip=[
-                        "Surface",
-                        alt.Tooltip("Generation (MWh):Q", format=".1f", title="MWh/yr"),
-                        alt.Tooltip("Share:Q", format=".1%", title="Share")
-                    ]
-                ).properties(title="PV generation share by surface", height=220)
-                return monthly_bar | donut
+                if surface_pie is not None:
+                    return surface_pie & monthly_bar
 
             if name_col and gen_b_col:
                 df_b["annual_MWh"] = df_b[gen_b_col] / 1000
@@ -743,7 +835,7 @@ def chart_self_sufficiency(cea_data, selected_buildings, output_mode):
                 y=alt.Y("MWh:Q", title="MWh"),
                 color=alt.Color("Type:N", scale=alt.Scale(
                     domain=["Surplus (MWh)", "Deficit (MWh)"],
-                    range=[C_SURPLUS, C_CARBON])),
+                    range=[C_SURPLUS_YELLOW, C_DEFICIT_GREY])),
                 xOffset="Type:N",
                 tooltip=["Month", "Type", alt.Tooltip("MWh:Q", format=".1f")]
             ).properties(title="Monthly surplus & deficit", height=220)
@@ -761,7 +853,7 @@ def chart_self_sufficiency(cea_data, selected_buildings, output_mode):
                 tooltip=["Month", "Series", alt.Tooltip("MWh:Q", format=".1f")]
             ).properties(title="Monthly PV vs demand", height=220)
 
-            return grouped | surplus_chart
+            return (grouped | surplus_chart).resolve_scale(color="independent")
 
     except Exception:
         return None
@@ -898,30 +990,52 @@ def chart_carbon_footprint(cea_data, selected_buildings, output_mode):
     net_tco2 = max(baseline_tco2 - avoided_tco2, 0)
     reduction = avoided_tco2 / baseline_tco2 if baseline_tco2 > 0 else 0
 
-    df_chart = pd.DataFrame({
-        "Metric": ["Grid-electricity baseline", "Avoided by BIPV", "Net after BIPV"],
-        "tCO2/year": [baseline_tco2, avoided_tco2, net_tco2],
-        "Type": ["baseline", "avoided", "net"],
+    outer = pd.DataFrame({
+        "Ring": ["Grid electricity baseline"],
+        "Segment": ["Grid electricity baseline"],
+        "tCO2/year": [baseline_tco2],
+        "Share": [1.0],
+    })
+    inner = pd.DataFrame({
+        "Ring": ["After BIPV", "After BIPV"],
+        "Segment": ["Avoided by BIPV", "Net after BIPV"],
+        "tCO2/year": [avoided_tco2, net_tco2],
+        "Share": [avoided_tco2 / baseline_tco2 if baseline_tco2 else 0,
+                  net_tco2 / baseline_tco2 if baseline_tco2 else 0],
     })
 
-    chart = alt.Chart(df_chart).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
-        x=alt.X("Metric:N", title="", sort=["Grid-electricity baseline", "Avoided by BIPV", "Net after BIPV"],
-                axis=alt.Axis(labelAngle=0)),
-        y=alt.Y("tCO2/year:Q", title="tCO2/year"),
+    outer_ring = alt.Chart(outer).mark_arc(radius=118, radius2=92).encode(
+        theta=alt.Theta("tCO2/year:Q"),
+        color=alt.Color("Segment:N", scale=alt.Scale(domain=["Grid electricity baseline"], range=[C_DEMAND]),
+                        legend=alt.Legend(title="Outer ring")),
+        tooltip=[
+            alt.Tooltip("Segment:N"),
+            alt.Tooltip("tCO2/year:Q", format=",.1f"),
+            alt.Tooltip("Share:Q", format=".1%")
+        ]
+    )
+    inner_pie = alt.Chart(inner).mark_arc(radius=84, radius2=20).encode(
+        theta=alt.Theta("tCO2/year:Q"),
         color=alt.Color(
-            "Type:N",
-            scale=alt.Scale(domain=["baseline", "avoided", "net"], range=[C_DEMAND, C_SURPLUS, C_CARBON]),
-            legend=None
+            "Segment:N",
+            scale=alt.Scale(domain=["Avoided by BIPV", "Net after BIPV"], range=[C_SURPLUS, C_CARBON]),
+            legend=alt.Legend(title="Inner ring")
         ),
         tooltip=[
-            "Metric",
+            alt.Tooltip("Segment:N"),
             alt.Tooltip("tCO2/year:Q", format=",.1f"),
-        ],
-    ).properties(
-        title=f"Electricity carbon footprint — BIPV avoids {reduction:.0%}",
-        height=240
+            alt.Tooltip("Share:Q", format=".1%")
+        ]
     )
-    return chart
+    center = alt.Chart(pd.DataFrame({"text": [f"{reduction:.0%}\navoided"]})).mark_text(
+        align="center", baseline="middle", fontSize=13, fontWeight="bold", color=C_DEMAND
+    ).encode(text="text:N")
+
+    return (outer_ring + inner_pie + center).properties(
+        title="Electricity carbon footprint: baseline vs after BIPV",
+        width=360,
+        height=300
+    )
 
 
 def chart_carbon(cea_data, selected_buildings, output_mode):
@@ -991,13 +1105,11 @@ def chart_carbon(cea_data, selected_buildings, output_mode):
     if output_mode == "Key takeaway":
         return chart
 
-    # Explain numbers / Design impl — add annual bar alongside
+    # Explain numbers / Design impl — add compact summary alongside
     df_annual = pd.DataFrame({
-        "Category": ["Embodied carbon", "Annual avoided (×10yr)", "Annual avoided (×25yr)"],
-        "tCO₂": [embodied_total / 1000,
-                 annual_avoided * 10 / 1000,
-                 annual_avoided * 25 / 1000],
-        "color": [C_CARBON, C_PV, C_SURPLUS]
+        "Category": ["Embodied carbon", "Annual avoided"],
+        "tCO₂": [embodied_total / 1000, annual_avoided / 1000],
+        "color": [C_CARBON, C_SURPLUS]
     })
     bar = alt.Chart(df_annual).mark_bar(cornerRadiusTopLeft=3,
                                          cornerRadiusTopRight=3).encode(
@@ -1248,6 +1360,7 @@ SKILL_CHART_MAP = {
     # Energy generation
     "performance-estimation--energy-generation":                            chart_energy_generation,
     "performance-estimation--panel-type-tradeoff":                          chart_panel_type_tradeoff,
+    "optimize-my-design--panel-type-tradeoff":                              chart_panel_type_tradeoff,
     "optimize-my-design--surface-prioritization":                           chart_energy_generation,
     "optimize-my-design--envelope-simplification":                          chart_energy_generation,
     "optimize-my-design--construction-and-integration":                     chart_energy_generation,
@@ -1255,6 +1368,7 @@ SKILL_CHART_MAP = {
     "performance-estimation--self-sufficiency":                             chart_self_sufficiency,
     # Carbon
     "impact-and-viability--carbon-impact--carbon-footprint":                chart_carbon_footprint,
+    "impact-and-viability--carbon-impact--operational-carbon-footprint":    chart_carbon_footprint,
     "impact-and-viability--carbon-impact--carbon-payback":                  chart_carbon,
     # Economic
     "impact-and-viability--economic-viability--cost-analysis":              chart_economic,
