@@ -175,21 +175,20 @@ CdTe (PV3) consistently offers the best balance of efficiency, cost, and embodie
 
 ## Radiation Threshold & Panel Type
 
-CEA applies a single `annual-radiation-threshold` parameter to **all panel types simultaneously** during a simulation run. This matters because each panel type has a different embodied carbon, which means the carbon-break-even irradiation threshold differs per type:
+CEA applies a single `annual-radiation-threshold` parameter to all panel types simultaneously during a simulation run. This matters because each panel type has different efficiency and embodied carbon.
 
-| Panel | Embodied Carbon | Threshold (Switzerland, 0.042 kgCO₂/kWh) | Threshold (Singapore, 0.408 kgCO₂/kWh) |
-|-------|----------------|------------------------------------------|------------------------------------------|
-| PV1 (cSi) | 255.8 kgCO₂/m² | 1200 kWh/m²/year (capped) | 800 kWh/m²/year (capped) |
-| PV2 (mcSi) | 191.2 kgCO₂/m² | 1200 kWh/m²/year (capped) | 800 kWh/m²/year (capped) |
-| PV3 (CdTe) | 47.6 kgCO₂/m² | 800 kWh/m²/year | 800 kWh/m²/year |
-| PV4 (CIGS) | 75.9 kgCO₂/m² | ~970 kWh/m²/year | 800 kWh/m²/year |
+The app's parameter check calculates the carbon-parity threshold per simulated panel type using:
 
-**Formula (Happle et al. 2019):**
-`I_threshold = EmBIPV / (em_grid × η × PR × LT)`
+`I_threshold = EmBIPV / (Gridem × η × PR × lifetime)`
 
-Where PR = 0.75 and LT = 25yr (Galimshina et al. 2024).
+The calculation combines:
+- local grid carbon intensity from the project location
+- PV1/PV2/PV3/PV4 embodied carbon
+- PV1/PV2/PV3/PV4 efficiency
+- PR = 0.75 and lifetime = 25 years unless a better project value is supplied
+- a stricter 10-year carbon-payback threshold as context
 
-**When multiple panel types are run together:** CEA uses one threshold for all. The app recommends setting the threshold to the **highest value among the simulated panel types**. Alternatively, run each panel type in a separate CEA simulation with its own threshold.
+When multiple panel types are run together, the app does not simply choose the lowest threshold. It first identifies the best overall simulated PV option from actual generation, lifetime carbon intensity, and installed cost, then checks that option against the carbon threshold. If the carbon threshold is above the facade-screening limit, the app shows an LCOE fallback threshold for that same panel.
 
 **Sources:**
 - Happle et al. (2019). J. Phys.: Conf. Ser. 1343, 012077.
