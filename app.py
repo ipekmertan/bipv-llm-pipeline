@@ -3316,6 +3316,95 @@ def regional_economic_context(weather_header, cea_data=None, selected_buildings=
     return "\n".join(lines)
 
 
+def build_threshold_economic_inputs(weather_header, cea_data):
+    """Prepare local, panel-aware economics for the PV radiation-threshold check."""
+    _, t = _select_economic_template(weather_header)
+    t = t or {}
+    pv_config = (cea_data or {}).get("pv_config", {}) or {}
+    files = (cea_data or {}).get("files", {}) or {}
+
+    currency = t.get("currency", "USD")
+    sym = t.get("currency_symbol", "$")
+
+    use_fractions, dominant_use = detect_building_use_types(cea_data)
+    use_prices = t.get("electricity_by_use_type", {}) or {}
+    electricity_price = None
+    if use_fractions and use_prices:
+        weighted = 0.0
+        weight = 0.0
+        for category, fraction in use_fractions.items():
+            price = use_prices.get(category, {}).get("price")
+            if price is not None:
+                weighted += float(price) * float(fraction)
+                weight += float(fraction)
+        if weight > 0:
+            electricity_price = weighted / weight
+    if electricity_price is None and dominant_use and use_prices.get(dominant_use, {}).get("price") is not None:
+        electricity_price = float(use_prices[dominant_use]["price"])
+    if electricity_price is None:
+        electricity_price = t.get("electricity_price_kwh")
+
+    def midpoint(low_key, high_key, fallback=None):
+        low = t.get(low_key)
+        high = t.get(high_key)
+        if low is not None and high is not None:
+            return (float(low) + float(high)) / 2
+        return fallback
+
+    pv_areas_by_panel = {}
+    pv_performance_by_panel = {}
+    for ptype in ["PV1", "PV2", "PV3", "PV4"]:
+        df = files.get(f"PV_{ptype}_total_buildings.csv")
+        total_df = files.get(f"PV_{ptype}_total.csv")
+        roof_area = 0.0
+        facade_area = 0.0
+        annual_gen = 0.0
+        if df is not None and not df.empty:
+            for col in df.columns:
+                low = col.lower()
+                try:
+                    value = float(df[col].sum())
+                except Exception:
+                    continue
+                if "pv_roofs" in low and low.endswith("_m2"):
+                    roof_area += value
+                elif "pv_walls" in low and low.endswith("_m2"):
+                    facade_area += value
+                elif annual_gen == 0 and ("e_pv_gen" in low or low.startswith("e_pv")):
+                    annual_gen = value
+        if total_df is not None and not total_df.empty:
+            gen_col = next((c for c in total_df.columns if "E_PV_gen" in c or "E_PV" in c), None)
+            if gen_col:
+                try:
+                    annual_gen = float(total_df[gen_col].sum())
+                except Exception:
+                    pass
+        pv_areas_by_panel[ptype] = {"roof_m2": roof_area, "facade_m2": facade_area}
+        pv_performance_by_panel[ptype] = {
+            "annual_generation_kwh": annual_gen,
+            "area_m2": roof_area + facade_area,
+        }
+
+    return {
+        "pv_types": pv_config.get("pv_types") or [p for p in ["PV1", "PV2", "PV3", "PV4"] if f"PV_{p}_total.csv" in files],
+        "panel_on_roof": pv_config.get("panel_on_roof"),
+        "panel_on_wall": pv_config.get("panel_on_wall"),
+        "pv_areas_by_panel": pv_areas_by_panel,
+        "pv_performance_by_panel": pv_performance_by_panel,
+        "currency": "EUR",
+        "currency_symbol": "€",
+        "electricity_price_kwh": electricity_price,
+        "export_compensation_kwh": t.get("export_compensation_kwh"),
+        "roof_cost_m2": 254.7,
+        "facade_cost_m2": 345.7,
+        "performance_ratio": 0.75,
+        "lifetime_years": 25,
+        "discount_rate": 0.05,
+        "fixed_om_rate": 0.01,
+        "variable_om_per_kwh": 0.0,
+    }
+
+
 @st.cache_data(ttl=86400, show_spinner=False)
 def research_public_grid_context(weather_header, skill_id):
     if skill_id != "site-potential--contextual-feasibility--infrastructure-readiness":
@@ -3949,6 +4038,9 @@ def render_parameter_check(threshold_result, skill_id):
     country = threshold_result["country"]
     em_grid = threshold_result["em_grid"]
     thresholds = threshold_result.get("thresholds_by_panel", {})
+    threshold_details = threshold_result.get("threshold_details_by_panel", {})
+    cea_reference = threshold_result.get("cea_reference_threshold", 800)
+    iteration_thresholds = threshold_result.get("cea_iteration_thresholds", [0, 200, 400, 600, 800])
 
     if simulations is not None and "pv" not in simulations:
         st.markdown(
@@ -3970,13 +4062,12 @@ def render_parameter_check(threshold_result, skill_id):
 
     from threshold_module import PV_PANEL_TYPES
 
-    thresholds_uncapped = threshold_result.get("thresholds_uncapped", {})
-    type_thresholds = {p: thresholds.get(p, 1200) for p in run_pv_types}
-    type_thresholds_uncapped = {p: thresholds_uncapped.get(p, 1200) for p in run_pv_types}
-
-    max_ptype = max(type_thresholds, key=lambda p: type_thresholds[p])
-    recommended = type_thresholds[max_ptype]
-    driving_panel = PV_PANEL_TYPES.get(max_ptype, {})
+    recommended_panel = threshold_result.get("recommended_panel") or run_pv_types[0]
+    recommended = threshold_result.get("recommended_threshold") or cea_reference
+    recommended_detail = threshold_details.get(recommended_panel, {})
+    threshold_basis = threshold_result.get("threshold_basis", "carbon_parity")
+    fallback_reason = threshold_result.get("fallback_reason")
+    fallback_limit = threshold_result.get("facade_empty_risk_threshold", 800)
 
     if len(run_pv_types) == 1:
         sim_label = f'Photovoltaic simulation<br><span style="font-size:11px;color:#999;">{run_pv_types[0]} — {PV_PANEL_TYPES.get(run_pv_types[0], {}).get("description", "")}</span>'
@@ -3984,43 +4075,43 @@ def render_parameter_check(threshold_result, skill_id):
         types_str = ", ".join([f"{p} ({PV_PANEL_TYPES.get(p,{}).get('description','')})" for p in run_pv_types])
         sim_label = f'Photovoltaic simulation<br><span style="font-size:11px;color:#999;">{types_str}</span>'
 
-    pr_label = threshold_result.get("pr_label", "PR 0.75")
+    eta = recommended_detail.get("eta")
+    pr = recommended_detail.get("performance_ratio", 0.75)
+    em_bipv = recommended_detail.get("em_bipv")
+    lifetime = recommended_detail.get("lifetime_years", 25)
+    cpp10 = recommended_detail.get("carbon_payback_10yr_threshold")
+    carbon_parity = recommended_detail.get("carbon_parity_threshold")
+    economic_threshold = recommended_detail.get("economic_threshold")
     if len(run_pv_types) == 1:
-        raw = int(type_thresholds_uncapped.get(run_pv_types[0], recommended))
-        cap = int(recommended)
-        if raw == cap:
-            info_text = (
-                f'In <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), '
-                f'the annual radiation threshold is <b>{raw} kWh/m&#x00B2;/year</b>.'
-            )
-        else:
-            info_text = (
-                f'In <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), '
-                f'the annual radiation threshold is {raw} kWh/m&#x00B2;/year '
-                f'— but that would exclude almost every surface in practice, '
-                f'so it is capped at <b>{cap} kWh/m&#x00B2;/year</b>.'
-            )
+        panel_intro = f'This checks <b>{recommended_panel}</b> in {city}, {country}.'
     else:
-        raw_strictest = int(type_thresholds_uncapped.get(max_ptype, recommended))
-        cap_strictest = int(recommended)
-        if raw_strictest == cap_strictest:
-            info_text = (
-                f'In <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), '
-                f'the annual radiation threshold is <b>{raw_strictest} kWh/m&#x00B2;/year</b>.'
-            )
-        else:
-            info_text = (
-                f'In <b>{city}, {country}</b> (grid: {em_grid} kgCO&#x2082;/kWh), '
-                f'the annual radiation threshold is {raw_strictest} kWh/m&#x00B2;/year '
-                f'— but that would exclude almost every surface in practice, '
-                f'so it is capped at <b>{cap_strictest} kWh/m&#x00B2;/year</b>.'
-            )
+        panel_intro = f'This first selects the <b>best overall simulated PV option</b>, <b>{recommended_panel}</b>, then checks it for {city}, {country}.'
+
+    if threshold_basis == "economic_lcoe_fallback":
+        info_text = (
+            f'{panel_intro} Its carbon threshold is {int(carbon_parity)} kWh/m&#x00B2;/year, '
+            f'which is above the {int(fallback_limit)} kWh/m&#x00B2;/year facade-screening limit. '
+            f'The displayed value therefore falls back to its LCOE threshold: '
+            f'<b>{int(economic_threshold)} kWh/m&#x00B2;/year</b>.'
+        )
+    else:
+        info_text = (
+            f'{panel_intro} The displayed value is its carbon-parity threshold using local grid carbon '
+            f'{em_grid:.3f} kgCO&#x2082;/kWh, embodied carbon {em_bipv:.1f} kgCO&#x2082;/m&#x00B2;, '
+            f'efficiency {eta:.1%}, PR {pr:.2f}, and {lifetime} years lifetime. '
+            f'The stricter 10-year carbon-payback threshold is {int(cpp10)} kWh/m&#x00B2;/year.'
+        )
 
     st.markdown("**Parameter check**")
 
     h1, h2, h3, h4 = st.columns([2.5, 2, 2, 4])
     for col, label in zip([h1, h2, h3, h4], ["Simulation", "Parameter", "Recommended value", "Info"]):
         with col:
+            cost_sentence = (
+                'Because the carbon threshold exceeded the facade-screening limit, LCOE is used only as a fallback display value here.<br><br>'
+                if threshold_basis == "economic_lcoe_fallback"
+                else 'Cost/LCOE can be treated in the economic prompts, but it is not used as the main radiation-threshold value here.<br><br>'
+            )
             st.markdown(
                 f'<p style="font-size:11px;font-weight:600;color:#888;letter-spacing:0.08em;'
                 f'text-transform:uppercase;margin:0;">{label}</p>',
@@ -4034,14 +4125,9 @@ def render_parameter_check(threshold_result, skill_id):
     with c2:
         st.markdown("`annual-radiation-threshold`")
     with c3:
-        status = "unverifiable"
-        tooltip = "Cannot verify — check this value in CEA"
-        if status == "wrong":
-            bg, border = "#fff0f0", "#ffcccc"
-        elif status == "correct":
-            bg, border = "#f0fff4", "#b2dfdb"
-        else:
-            bg, border = "#e3f2fd", "#90caf9"
+        tooltip_basis = "LCOE fallback" if threshold_basis == "economic_lcoe_fallback" else "carbon-parity"
+        tooltip = f"Calculated {tooltip_basis} threshold for {recommended_panel}; CEA default reference is {int(cea_reference)} kWh/m²/year"
+        bg, border = "#f0fff4", "#b2dfdb"
         st.markdown(
             f'<div style="background:{bg};border:1px solid {border};border-radius:6px;'
             f'padding:6px 10px;font-size:13px;cursor:default;" '
@@ -4061,35 +4147,63 @@ def render_parameter_check(threshold_result, skill_id):
         if st.session_state.get("reasoning_threshold"):
             if len(run_pv_types) > 1:
                 panel_table = "".join([
+                    (lambda d: (
                     f'<tr><td style="padding:2px 8px;">{p}</td>'
                     f'<td style="padding:2px 8px;">{PV_PANEL_TYPES.get(p,{}).get("description","")}</td>'
-                    f'<td style="padding:2px 8px;">{PV_PANEL_TYPES.get(p,{}).get("em_bipv","")} kgCO&#x2082;/m&#x00B2;</td>'
-                    f'<td style="padding:2px 8px;"><b>{int(type_thresholds[p])} kWh/m&#x00B2;/yr</b></td></tr>'
+                    f'<td style="padding:2px 8px;">{d.get("em_bipv",0):,.1f} kgCO&#x2082;/m&#x00B2;</td>'
+                    f'<td style="padding:2px 8px;">{d.get("eta",0):.1%}</td>'
+                    f'<td style="padding:2px 8px;"><b>{int(d.get("carbon_parity_threshold") or cea_reference)} kWh/m&#x00B2;/yr</b></td>'
+                    f'<td style="padding:2px 8px;">{int(d.get("carbon_payback_10yr_threshold") or cea_reference)} kWh/m&#x00B2;/yr</td></tr>'
+                    ))(threshold_details.get(p, {}))
                     for p in run_pv_types
                 ])
                 panel_section = (
                     f'<p style="font-size:12px;margin:8px 0 4px 0;"><strong>Thresholds by panel type:</strong></p>'
                     f'<table style="font-size:11px;color:#555;border-collapse:collapse;">'
                     f'<tr style="color:#999;"><td style="padding:2px 8px;">Type</td><td style="padding:2px 8px;">Technology</td>'
-                    f'<td style="padding:2px 8px;">Embodied carbon</td><td style="padding:2px 8px;">Threshold</td></tr>'
+                    f'<td style="padding:2px 8px;">Embodied carbon</td><td style="padding:2px 8px;">Efficiency</td>'
+                    f'<td style="padding:2px 8px;">Carbon parity</td><td style="padding:2px 8px;">10yr carbon payback</td></tr>'
                     f'{panel_table}</table>'
                 )
             else:
                 panel_section = ""
 
+            eta_val = recommended_detail.get("eta", 0)
+            pr_val = recommended_detail.get("performance_ratio", 0.75)
+            em_val = recommended_detail.get("em_bipv", 0)
+            lifetime_val = recommended_detail.get("lifetime_years", 25)
+            cpp10_val = recommended_detail.get("carbon_payback_10yr_threshold")
+            economic_val = recommended_detail.get("economic_threshold")
+            carbon_val = recommended_detail.get("carbon_parity_threshold")
+            if threshold_basis == "economic_lcoe_fallback":
+                threshold_explanation = (
+                    f'<strong>Best overall PV option:</strong> {recommended_panel}. '
+                    f'Its carbon-parity threshold is <strong>{int(carbon_val)} kWh/m&sup2;/year</strong>, '
+                    f'which is above the <strong>{int(fallback_limit)} kWh/m&sup2;/year</strong> facade-screening limit. '
+                    f'The app therefore shows its LCOE fallback threshold instead: '
+                    f'<strong>{int(economic_val)} kWh/m&sup2;/year</strong>. This keeps facade BIPV visible for early design, '
+                    f'while making clear that the carbon-only target is stricter.'
+                )
+            else:
+                threshold_explanation = (
+                    f'<strong>For {recommended_panel}:</strong> {em_val:.1f} kgCO&#x2082;/m&sup2; / '
+                    f'({em_grid:.3f} kgCO&#x2082;/kWh × {eta_val:.1%} × {pr_val:.2f} × {lifetime_val} years) '
+                    f'= <strong>{int(recommended)} kWh/m&sup2;/year</strong>.<br>'
+                    f'The stricter 10-year carbon-payback target would require '
+                    f'<strong>{int(cpp10_val)} kWh/m&sup2;/year</strong>. '
+                )
             st.markdown(
                 f'<div style="background:#f7f7f7;border:1px solid #e8e8e8;border-radius:8px;'
                 f'padding:12px 14px;margin-top:8px;font-size:12px;color:#555;line-height:1.7;">'
-                f'Every surface needs a minimum amount of sunlight to make BIPV worthwhile. '
-                f'Below this level, the panel never generates enough clean electricity to offset '
-                f'the carbon emitted when it was manufactured. '
-                f'For <strong>{country}</strong> (grid: {em_grid} kgCO&#x2082;/kWh) — '
-                f'the cleaner the grid, the harder panels are to justify on carbon grounds, '
-                f'so a cleaner grid means a higher threshold. '
-                f'When the raw threshold exceeds 1200 kWh/m&#x00B2;/year it is capped there, '
-                f'because beyond that almost no real surface qualifies and the value becomes impractical. '
-                f'CEA\'s default of 800 kWh/m&sup2;/year was set for carbon-intensive grids '
-                f'like Southeast Asia and is often too low for Europe.'
+                f'Happle et al. define the threshold by comparing PV life-cycle carbon intensity with the local grid. '
+                f'McCarty et al. show that this threshold changes strongly by grid carbon intensity and PV technology; '
+                f'cost/LCOE is a separate economic target, not the main carbon-screening value.<br><br>'
+                f'<strong>Formula used for the displayed value:</strong> threshold = embodied carbon / '
+                f'(grid carbon × efficiency × PR × lifetime).<br>'
+                f'{threshold_explanation}<br>'
+                f'{cost_sentence}'
+                f'CEA still recommends sensitivity testing around '
+                f'<strong>{", ".join(str(x) for x in iteration_thresholds)} kWh/m&sup2;/year</strong> when exploring cost/yield trade-offs.'
                 f'{panel_section}'
                 f'</div>',
                 unsafe_allow_html=True
@@ -4207,7 +4321,8 @@ if st.session_state.cea_data is None:
                 st.session_state.threshold_result = get_threshold_check(
                     cea_data["files"]["weather_header"], cea_default=800,
                     self_consumption=cea_data.get("pv_config", {}).get("self_consumption", 0.5),
-                    acacia_data=load_acacia_curves()
+                    acacia_data=load_acacia_curves(),
+                    economic_inputs=build_threshold_economic_inputs(cea_data["files"]["weather_header"], cea_data)
                 )
             st.rerun()
 
