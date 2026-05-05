@@ -98,11 +98,13 @@ The LLM should interpret the computed metrics into an architectural strategy:
 - give the strategy answer first
 - explain which surface mix creates the most constant solar profile
 - explain whether daily storage, seasonal storage, both, or mainly grid interaction is needed
-- explain where storage could fit in the building context
+- give the computed short-term storage allowance in kWh and approximate room area in m2 when those metrics are supplied
+- explain where storage could fit in the building context: usually beside the inverter/main electrical room, in a basement or ground-floor service zone, with short riser/cable routes and maintenance access
 - adapt recommendations to use type and likely occupancy timing
 - explain how WWR affects facade PV coverage feasibility
 
 Do not invent missing electricity prices, regulations, tariffs, storage products, or detailed engineering requirements.
+Do not discuss cooling demand, heating demand, or thermal storage unless the computed Storage Necessity metrics explicitly provide those values.
 
 ---
 
@@ -117,7 +119,7 @@ Do not invent missing electricity prices, regulations, tariffs, storage products
   - seasonal storage/grid dependency issue
   - both short-term and long-term balancing needed
 - If hourly demand and PV are available, give approximate battery capacity and battery-room area.
-- Mention likely building location for the storage room, such as basement/service room/electrical room/roof plant room, based on project context if available.
+- Mention likely building location for the storage room. Prefer a clear architectural instruction such as: "reserve X-Y m2 beside the main electrical/inverter room in a basement or ground-floor service zone, close to the PV riser and metering point."
 
 **Explain the numbers**
 - Explain daily timing numbers, seasonal imbalance numbers, and storage calculation logic.
@@ -132,13 +134,16 @@ Do not invent missing electricity prices, regulations, tariffs, storage products
 - Distinguish roof coverage, facade coverage, and storage-room allowance as separate design moves.
 - For residential or evening-heavy uses, emphasize storage or shared/community energy use.
 - For office, school, retail, hospital, or industrial daytime-heavy uses, emphasize direct self-consumption and daily load matching.
+- Do not add generic cooling-load or heating-load advice. This skill is about electrical PV timing and storage unless explicit cooling/heating metrics are supplied.
 
 ---
 
 ## Common Pitfalls
 
 - Do not size storage from irradiation alone. Use hourly PV generation and hourly demand.
-- Do not treat seasonal storage as a normal battery-room issue. Seasonal storage is usually district-scale, grid-based, thermal, hydrogen, or other specialized infrastructure.
+- Do not treat seasonal storage as a normal battery-room issue. Seasonal mismatch should usually be framed as grid dependency or external infrastructure unless a specific seasonal-storage system is supplied.
 - Do not recommend facade PV coverage percentages unless envelope/WWR and area data support the claim.
 - Do not assume roof-only PV is the final design if wall panels were excluded from the PV simulation. If walls were excluded, say that facade recommendations are based on irradiation potential and require re-running PV with wall panels enabled.
 - Do not use one default panel value for all PV types. Panel parameters must come from `PHOTOVOLTAIC_PANELS.csv`.
+- Do not mention cooling demand, heating demand, HVAC operation, or thermal storage from inference alone.
+
