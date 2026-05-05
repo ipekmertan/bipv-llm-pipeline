@@ -245,6 +245,10 @@ def _pv_surface_pie_chart(cea_data, pv_fname, selected_buildings=None):
 
     df_group = df_surface.groupby("Group", as_index=False)["MWh"].sum()
     df_group["Share"] = df_group["MWh"] / total_mwh
+    df_group["Label"] = df_group.apply(
+        lambda row: f"{row['Group']} {row['Share']:.0%}",
+        axis=1
+    )
     roof_mwh = float(df_group.loc[df_group["Group"] == "Roof", "MWh"].sum())
     facade_mwh = float(df_group.loc[df_group["Group"] == "Facade", "MWh"].sum())
 
@@ -265,17 +269,28 @@ def _pv_surface_pie_chart(cea_data, pv_fname, selected_buildings=None):
         width=330,
         height=270
     )
+    group_labels = alt.Chart(df_group).mark_text(
+        radius=112, fontSize=12, fontWeight="bold", color=C_DEMAND
+    ).encode(
+        theta=alt.Theta("MWh:Q", stack=True),
+        text="Label:N"
+    )
+    group_pie = group_pie + group_labels
 
     df_facade = df_surface[df_surface["Group"] == "Facade"].copy()
     if df_facade.empty or facade_mwh <= 0:
         return group_pie
     df_facade["Share"] = df_facade["MWh"] / facade_mwh
+    df_facade["Label"] = df_facade.apply(
+        lambda row: f"{row['Surface'].replace(' facade', '')} {row['Share']:.0%}",
+        axis=1
+    )
     facade_order = ["South facade", "East facade", "West facade", "North facade"]
     facade_pie = alt.Chart(df_facade).mark_arc(outerRadius=92, innerRadius=34).encode(
         theta=alt.Theta("MWh:Q"),
         color=alt.Color(
             "Surface:N",
-            scale=alt.Scale(domain=facade_order, range=[C_SURPLUS, "#e8b86d", "#a8d5b5", C_NEUTRAL]),
+            scale=alt.Scale(domain=facade_order, range=["#4f8f7b", "#d98c48", "#6d78b8", "#9b9b9b"]),
             legend=alt.Legend(title="Facade yield")
         ),
         tooltip=[
@@ -284,6 +299,13 @@ def _pv_surface_pie_chart(cea_data, pv_fname, selected_buildings=None):
             alt.Tooltip("Share:Q", title="Facade share", format=".1%")
         ]
     ).properties(title="Facade yield distribution", width=330, height=270)
+    facade_labels = alt.Chart(df_facade).mark_text(
+        radius=112, fontSize=11, fontWeight="bold", color=C_DEMAND
+    ).encode(
+        theta=alt.Theta("MWh:Q", stack=True),
+        text="Label:N"
+    )
+    facade_pie = facade_pie + facade_labels
 
     return alt.hconcat(group_pie, facade_pie, spacing=28).resolve_scale(color="independent")
 
