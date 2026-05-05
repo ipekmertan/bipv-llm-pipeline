@@ -641,7 +641,7 @@ def chart_energy_generation(cea_data, selected_buildings, output_mode):
 
     monthly = _monthly_from_hourly(df_pv, gen_col)
     if monthly is None:
-        return None
+        monthly = pd.Series([0] * 12, index=range(1, 13))
     monthly = monthly * pv_scale
 
     surface_pie = _pv_surface_pie_chart(cea_data, pv_fname, selected_buildings)
@@ -663,31 +663,7 @@ def chart_energy_generation(cea_data, selected_buildings, output_mode):
         return surface_pie if surface_pie is not None else monthly_bar
 
     if output_mode == "Explain the numbers":
-        # Add daily profile
-        date_col = _find_col(df_pv, "date", "Date", "time")
-        if date_col:
-            try:
-                df_pv["_dt"] = pd.to_datetime(df_pv[date_col], utc=True, errors="coerce")
-                df_pv["hour"] = df_pv["_dt"].dt.hour
-                hourly_avg = df_pv.groupby("hour")[gen_col].mean() * pv_scale / 1000
-                df_hourly = pd.DataFrame({
-                    "Hour": hourly_avg.index,
-                    "Avg generation (MWh)": hourly_avg.values
-                })
-                profile = alt.Chart(df_hourly).mark_area(
-                    color=C_PV, opacity=0.4, line={"color": C_PV, "strokeWidth": 2}
-                ).encode(
-                    x=alt.X("Hour:Q", title="Hour of day",
-                            scale=alt.Scale(domain=[0, 23])),
-                    y=alt.Y("Avg generation (MWh):Q", title="MWh (avg)"),
-                    tooltip=["Hour", alt.Tooltip("Avg generation (MWh):Q", format=".2f")]
-                ).properties(title="Average daily generation profile", height=240, width=720)
-                if surface_pie is not None:
-                    return alt.vconcat(surface_pie, monthly_bar, profile, spacing=24)
-                return alt.vconcat(monthly_bar, profile, spacing=24)
-            except Exception:
-                pass
-        return alt.vconcat(surface_pie, monthly_bar, spacing=24) if surface_pie is not None else monthly_bar
+        return surface_pie if surface_pie is not None else monthly_bar
 
     if output_mode == "Design implication":
         # Surface contribution from buildings file: roof/facade share of total PV generation
@@ -724,7 +700,7 @@ def chart_energy_generation(cea_data, selected_buildings, output_mode):
                 color_range = [C_PV, C_SURPLUS, "#e8b86d", "#a8d5b5", C_NEUTRAL]
 
                 if surface_pie is not None:
-                    return surface_pie & monthly_bar
+                    return surface_pie
 
             if name_col and gen_b_col:
                 df_b["annual_MWh"] = df_b[gen_b_col] / 1000
@@ -739,7 +715,7 @@ def chart_energy_generation(cea_data, selected_buildings, output_mode):
                 ).properties(title="Generation share by building", height=220)
                 return monthly_bar | donut
 
-        return monthly_bar
+        return surface_pie if surface_pie is not None else monthly_bar
 
 
 def chart_panel_type_tradeoff(cea_data, selected_buildings, output_mode):
@@ -1286,45 +1262,86 @@ def chart_economic(cea_data, selected_buildings, output_mode):
     color_domain = ["Roof", "South facade", "East facade", "West facade", "North facade"]
     color_range = [C_PV, C_SURPLUS, "#e8b86d", "#a8d5b5", C_NEUTRAL]
 
-    payback = alt.Chart(df).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
-        x=alt.X("Surface:N", title="", sort=color_domain, axis=alt.Axis(labelAngle=-25)),
-        y=alt.Y("Payback period (years):Q", title="Years"),
-        color=alt.Color("Surface:N", scale=alt.Scale(domain=color_domain, range=color_range), legend=None),
+    years = list(range(0, lifetime_years + 1))
+    cashflow_rows = []
+    lcoe_rows = []
+    for _, row in df.iterrows():
+        for year in years:
+            cashflow_rows.append({
+                "Surface": str(row["Surface"]),
+                "Year": year,
+                "Cumulative return": -float(row["Investment"]) + float(row["Annual value"]) * year,
+                "Investment": float(row["Investment"]),
+                "Annual value": float(row["Annual value"]),
+                "Payback period": float(row["Payback period (years)"]),
+            })
+        for year in range(1, lifetime_years + 1):
+            cumulative_cost = float(row["Investment"]) + float(row["Investment"]) * o_and_m_rate * year
+            cumulative_generation = float(row["kWh"]) * year
+            lcoe_rows.append({
+                "Surface": str(row["Surface"]),
+                "Year": year,
+                f"Cumulative unit cost ({price_unit})": cumulative_cost / cumulative_generation,
+                "Grid price": grid_price,
+                "Annual generation": float(row["kWh"]),
+                "Area": float(row["Area (m2)"]),
+            })
+
+    df_cash = pd.DataFrame(cashflow_rows)
+    df_lcoe = pd.DataFrame(lcoe_rows)
+
+    return_line = alt.Chart(df_cash).mark_line(point=True, strokeWidth=2).encode(
+        x=alt.X("Year:Q", title="Years after installation", scale=alt.Scale(domain=[0, lifetime_years])),
+        y=alt.Y("Cumulative return:Q", title="Cumulative return"),
+        color=alt.Color(
+            "Surface:N",
+            scale=alt.Scale(domain=color_domain, range=color_range),
+            legend=alt.Legend(title="PV surface")
+        ),
         tooltip=[
             alt.Tooltip("Surface:N"),
-            alt.Tooltip("Payback period (years):Q", format=".1f"),
-            alt.Tooltip("Investment:Q", title="Investment", format=",.0f"),
-            alt.Tooltip("Annual value:Q", title="Annual value", format=",.0f"),
+            alt.Tooltip("Year:Q"),
+            alt.Tooltip("Cumulative return:Q", format=",.0f"),
+            alt.Tooltip("Investment:Q", title="Initial investment", format=",.0f"),
+            alt.Tooltip("Annual value:Q", title="Annual electricity value", format=",.0f"),
+            alt.Tooltip("Payback period:Q", title="Payback year", format=".1f"),
         ],
-    ).properties(title="Simple payback period by PV surface", height=320, width=760)
-
-    lifetime_rule = alt.Chart(pd.DataFrame({"y": [25], "Label": ["25-year panel lifetime"]})).mark_rule(
-        color=C_DEMAND, strokeDash=[5, 4]
-    ).encode(
-        y="y:Q",
-        tooltip=[alt.Tooltip("Label:N")]
+    ).properties(
+        title="Cumulative return by PV surface",
+        height=330,
+        width=760
     )
 
-    lcoe = alt.Chart(df).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
-        x=alt.X("Surface:N", title="", sort=color_domain, axis=alt.Axis(labelAngle=-25)),
-        y=alt.Y("LCOE:Q", title=price_unit),
-        color=alt.Color("Surface:N", scale=alt.Scale(domain=color_domain, range=color_range), legend=None),
+    zero_rule = alt.Chart(pd.DataFrame({"y": [0], "Label": ["investment recovered"]})).mark_rule(
+        color=C_DEMAND, strokeDash=[5, 4]
+    ).encode(y="y:Q", tooltip=[alt.Tooltip("Label:N")])
+
+    lcoe_line = alt.Chart(df_lcoe).mark_line(point=True, strokeWidth=2).encode(
+        x=alt.X("Year:Q", title="Years after installation", scale=alt.Scale(domain=[1, lifetime_years])),
+        y=alt.Y(f"Cumulative unit cost ({price_unit}):Q", title=price_unit),
+        color=alt.Color(
+            "Surface:N",
+            scale=alt.Scale(domain=color_domain, range=color_range),
+            legend=alt.Legend(title="PV surface")
+        ),
         tooltip=[
             alt.Tooltip("Surface:N"),
-            alt.Tooltip("LCOE:Q", title=f"LCOE ({price_unit})", format=".3f"),
-            alt.Tooltip("kWh:Q", title="Generation (kWh/year)", format=",.0f"),
-            alt.Tooltip("Area (m2):Q", title="PV area (m2)", format=",.1f"),
+            alt.Tooltip("Year:Q"),
+            alt.Tooltip(f"Cumulative unit cost ({price_unit}):Q", title=f"Unit cost ({price_unit})", format=".3f"),
+            alt.Tooltip("Annual generation:Q", title="Generation (kWh/year)", format=",.0f"),
+            alt.Tooltip("Area:Q", title="PV area (m2)", format=",.1f"),
         ],
-    ).properties(title="LCOE by PV surface vs grid price", height=320, width=760)
+    ).properties(
+        title="Cumulative BIPV electricity cost vs grid price",
+        height=330,
+        width=760
+    )
 
     grid_rule = alt.Chart(pd.DataFrame({"y": [grid_price], "Label": [f"Grid price: {grid_price:.2f} {price_unit}"]})).mark_rule(
         color=C_CARBON, strokeDash=[5, 4]
-    ).encode(
-        y="y:Q",
-        tooltip=[alt.Tooltip("Label:N")]
-    )
+    ).encode(y="y:Q", tooltip=[alt.Tooltip("Label:N")])
 
-    return alt.vconcat(payback + lifetime_rule, lcoe + grid_rule, spacing=26)
+    return alt.vconcat(return_line + zero_rule, lcoe_line + grid_rule, spacing=28)
 
 
 def chart_seasonal_patterns(cea_data, selected_buildings, output_mode):
