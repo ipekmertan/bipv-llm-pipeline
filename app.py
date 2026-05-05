@@ -343,6 +343,12 @@ def extract_cea_zip(uploaded_file):
                 try: result["files"][fpath.name] = pd.read_csv(fpath)
                 except: pass
 
+        solar_radiation_dir = scenario / "outputs" / "data" / "solar-radiation"
+        if solar_radiation_dir.exists():
+            for fpath in sorted(solar_radiation_dir.glob("*_radiation.csv")):
+                try: result["files"][fpath.name] = pd.read_csv(fpath)
+                except: pass
+
         envelope = scenario / "inputs" / "building-properties" / "envelope.csv"
         if envelope.exists():
             try: result["files"]["envelope.csv"] = pd.read_csv(envelope)
@@ -739,9 +745,34 @@ def _monthly_from_hourly(df, col):
         return None
 
 
-def compute_daily_pattern_metrics(cea_data):
-    df = cea_data["files"].get("solar_irradiation_hourly.csv")
-    source = "solar_irradiation_hourly.csv"
+def compute_daily_pattern_metrics(cea_data, selected_buildings=None, scale="District"):
+    files = cea_data.get("files", {})
+    df = None
+    source = None
+    using_native_building_hourly = False
+    if selected_buildings:
+        radiation_frames = []
+        for building in selected_buildings:
+            radiation_df = files.get(f"{building}_radiation.csv")
+            if radiation_df is not None:
+                radiation_frames.append(radiation_df.copy())
+        if radiation_frames:
+            df = radiation_frames[0]
+            for extra in radiation_frames[1:]:
+                time_col = _find_metric_col(df, "date", "time")
+                extra_time_col = _find_metric_col(extra, "date", "time")
+                if time_col and extra_time_col and len(extra) == len(df):
+                    for col in _surface_columns(extra).values():
+                        if col and col in extra.columns:
+                            if col not in df.columns:
+                                df[col] = 0
+                            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0) + pd.to_numeric(extra[col], errors="coerce").fillna(0)
+            source = ", ".join(f"{building}_radiation.csv" for building in selected_buildings if files.get(f"{building}_radiation.csv") is not None)
+            using_native_building_hourly = True
+
+    if df is None:
+        df = files.get("solar_irradiation_hourly.csv")
+        source = "solar_irradiation_hourly.csv"
     if df is None:
         return "Hourly irradiation file is not available, so an average 24-hour profile cannot be calculated reliably."
 
@@ -767,9 +798,39 @@ def compute_daily_pattern_metrics(cea_data):
     if not surfaces:
         return f"{source} is available, but no opaque surface irradiation columns were found."
 
-    lines = [f"Source: {source}", "Metric: average hourly irradiation by hour of day (0-23), averaged across the year."]
+    selected_surface_totals = {}
+    annual_source = None
+    if selected_buildings and not using_native_building_hourly:
+        annual_df = cea_data["files"].get("solar_irradiation_annually_buildings.csv")
+        name_col = _find_metric_col(annual_df, "name", "building") if annual_df is not None else None
+        if annual_df is not None and name_col:
+            selected_annual = annual_df[annual_df[name_col].isin(selected_buildings)].copy()
+            annual_surfaces = {name: col for name, col in _surface_columns(selected_annual).items() if col}
+            for surface, annual_col in annual_surfaces.items():
+                selected_surface_totals[surface] = float(pd.to_numeric(selected_annual[annual_col], errors="coerce").fillna(0).sum())
+            if selected_surface_totals:
+                annual_source = "solar_irradiation_annually_buildings.csv"
+
+    lines = [f"Source: {source}"]
+    if selected_buildings:
+        lines.append(f"Scale: {scale}; selected buildings: {', '.join(selected_buildings)}.")
+    if using_native_building_hourly:
+        lines.append("Metric: native building-level average 24-hour solar radiation profile from CEA solar-radiation outputs. Hourly kW values are treated as kWh per one-hour timestep.")
+    elif annual_source:
+        lines.append(
+            "Metric: average 24-hour irradiation profile scaled to the selected building annual surface totals. "
+            "CEA provides the hourly profile at scenario level here, so this is a building-scaled estimate, not a native building-hourly file."
+        )
+    else:
+        lines.append("Metric: average hourly irradiation by hour of day (0-23), averaged across the year.")
+
     for surface, col in surfaces.items():
-        hourly = df.groupby("_hour")[col].mean().reindex(range(24), fill_value=0)
+        values = pd.to_numeric(df[col], errors="coerce").fillna(0)
+        if surface in selected_surface_totals:
+            scenario_annual = float(values.sum())
+            if scenario_annual > 0:
+                values = values * (selected_surface_totals[surface] / scenario_annual)
+        hourly = values.groupby(df["_hour"]).mean().reindex(range(24), fill_value=0)
         peak_hour = int(hourly.idxmax())
         peak_value = hourly.max()
         daily_total = hourly.sum()
@@ -2025,18 +2086,28 @@ def compute_self_sufficiency_metrics(cea_data, selected_buildings=None, scale="D
         pv_work["_month"] = pv_work["_dt"].dt.month
         pv_work["_pv"] = pv_hourly.values
         pv_work["_demand"] = demand_hourly.values
-        monthly = pv_work.groupby("_month")[["_pv", "_demand"]].sum().reindex(range(1, 13), fill_value=0)
-        monthly["_covered"] = monthly[["_pv", "_demand"]].min(axis=1)
+        pv_work["_self"] = pd.concat([pv_work["_pv"], pv_work["_demand"]], axis=1).min(axis=1)
+        monthly = pv_work.groupby("_month")[["_pv", "_demand", "_self"]].sum().reindex(range(1, 13), fill_value=0)
         monthly["_direct_ss"] = monthly.apply(
-            lambda r: (r["_covered"] / r["_demand"] * 100) if r["_demand"] > 0 else None,
+            lambda r: (r["_self"] / r["_demand"] * 100) if r["_demand"] > 0 else None,
+            axis=1
+        )
+        monthly["_coverage_before_timing"] = monthly.apply(
+            lambda r: (r["_pv"] / r["_demand"] * 100) if r["_demand"] > 0 else None,
             axis=1
         )
         if monthly["_direct_ss"].notna().any():
             best_month = int(monthly["_direct_ss"].idxmax())
             worst_month = int(monthly["_direct_ss"].idxmin())
+            best_screen_month = int(monthly["_coverage_before_timing"].idxmax())
             monthly_lines.append(
                 f"Best month for direct self-sufficiency: {MONTHS[best_month - 1]} ({_format_number(monthly.loc[best_month, '_direct_ss'], '%', 1)}). "
                 f"Worst month: {MONTHS[worst_month - 1]} ({_format_number(monthly.loc[worst_month, '_direct_ss'], '%', 1)})."
+            )
+            monthly_lines.append(
+                f"Best monthly PV/demand screen before timing losses: {MONTHS[best_screen_month - 1]} "
+                f"({_format_number(monthly.loc[best_screen_month, '_coverage_before_timing'], '%', 1)}). "
+                "This is useful for seasonal sizing, but it is not direct hourly self-sufficiency."
             )
 
         pv_work["_hour"] = pv_work["_dt"].dt.hour
@@ -2046,7 +2117,11 @@ def compute_self_sufficiency_metrics(cea_data, selected_buildings=None, scale="D
             worst_hour = int(mismatch.idxmax())
             surplus_hours = [int(h) for h, row in hourly.iterrows() if row["_pv"] > row["_demand"]]
             if surplus_hours:
-                monthly_lines.append(f"Typical daily mismatch: strongest deficit occurs around {worst_hour}:00; surplus hours occur roughly from {min(surplus_hours)}:00 to {max(surplus_hours)}:00.")
+                if len(surplus_hours) > 1 and surplus_hours == list(range(min(surplus_hours), max(surplus_hours) + 1)):
+                    surplus_text = f"roughly from {min(surplus_hours)}:00 to {max(surplus_hours)}:00"
+                else:
+                    surplus_text = ", ".join(f"{h}:00" for h in surplus_hours)
+                monthly_lines.append(f"Typical daily mismatch: strongest deficit occurs around {worst_hour}:00; surplus hours occur at {surplus_text}.")
             else:
                 monthly_lines.append(f"Typical daily mismatch: strongest deficit occurs around {worst_hour}:00; PV rarely exceeds demand in the average hourly profile.")
 
@@ -2066,6 +2141,124 @@ def compute_self_sufficiency_metrics(cea_data, selected_buildings=None, scale="D
     lines.append(f"Annual grid import/deficit after hourly PV offset: {_format_number(deficit, ' kWh/year')} ({_format_number(deficit / 1000, ' MWh/year', 1)}).")
     lines.extend(monthly_lines)
     lines.append("Interpretation boundary: Self-Sufficiency owns demand matching. Do not use solar irradiation values as PV generation, and do not use district totals when selected buildings are supplied.")
+    return "\n".join(lines)
+
+
+def compute_storage_necessity_metrics(cea_data, selected_buildings=None, scale="District"):
+    files = cea_data.get("files", {})
+    pv_fname = next((k for k in files
+                     if k.startswith("PV_PV") and k.endswith("_total.csv")
+                     and "buildings" not in k), None)
+    if not pv_fname:
+        return "No PV total hourly file is available, so storage necessity cannot be calculated reliably."
+
+    pv_df = files.get(pv_fname)
+    gen_col = _find_metric_col(pv_df, "E_PV_gen", "E_PV", "gen") if pv_df is not None else None
+    if pv_df is None or gen_col is None:
+        return f"{pv_fname} is available, but no PV generation column was found."
+
+    district_annual_pv = float(pd.to_numeric(pv_df[gen_col], errors="coerce").fillna(0).sum())
+    pv_scale = 1.0
+    pv_source = f"{pv_fname} district hourly total"
+    bldg_fname = pv_fname.replace("_total.csv", "_total_buildings.csv")
+    pv_b = files.get(bldg_fname)
+    if selected_buildings and pv_b is not None:
+        name_col = _find_metric_col(pv_b, "name", "building")
+        gen_b_col = _find_metric_col(pv_b, "E_PV_gen", "E_PV", "gen")
+        if name_col and gen_b_col:
+            selected_pv = pv_b[pv_b[name_col].isin(selected_buildings)]
+            selected_annual_pv = float(pd.to_numeric(selected_pv[gen_b_col], errors="coerce").fillna(0).sum())
+            if selected_annual_pv > 0 and district_annual_pv > 0:
+                pv_scale = selected_annual_pv / district_annual_pv
+                pv_source = f"{bldg_fname} filtered to selected building(s), with hourly profile scaled from {pv_fname}"
+
+    demand_hourly, demand_source = _sum_hourly_demand_series(files, selected_buildings)
+    if demand_hourly is None or len(demand_hourly) == 0:
+        return "No hourly electricity demand file was found for the selected scope, so storage necessity cannot be calculated reliably."
+
+    pv_hourly = pd.to_numeric(pv_df[gen_col], errors="coerce").fillna(0).reset_index(drop=True) * pv_scale
+    n = min(len(pv_hourly), len(demand_hourly))
+    pv_hourly = pv_hourly.iloc[:n].reset_index(drop=True)
+    demand_hourly = demand_hourly.iloc[:n].reset_index(drop=True)
+
+    annual_pv = float(pv_hourly.sum())
+    annual_demand = float(demand_hourly.sum())
+    self_consumed = float(pd.concat([pv_hourly, demand_hourly], axis=1).min(axis=1).sum())
+    surplus_hourly = (pv_hourly - demand_hourly).clip(lower=0)
+    deficit_hourly = (demand_hourly - pv_hourly).clip(lower=0)
+    annual_surplus = float(surplus_hourly.sum())
+    annual_deficit = float(deficit_hourly.sum())
+    direct_ss = self_consumed / annual_demand * 100 if annual_demand > 0 else None
+    self_consumption = self_consumed / annual_pv * 100 if annual_pv > 0 else None
+    annual_screen = annual_pv / annual_demand * 100 if annual_demand > 0 else None
+    peak_pv = float(pv_hourly.max())
+    peak_demand = float(demand_hourly.max())
+
+    date_col = _find_metric_col(pv_df, "date", "time")
+    monthly_line = ""
+    room_line = ""
+    if date_col:
+        work = pv_df.iloc[:n].copy()
+        work["_dt"] = pd.to_datetime(work[date_col], utc=True, errors="coerce")
+        work["_month"] = work["_dt"].dt.month
+        work["_date"] = work["_dt"].dt.date
+        work["_pv"] = pv_hourly.values
+        work["_demand"] = demand_hourly.values
+        work["_self"] = pd.concat([work["_pv"], work["_demand"]], axis=1).min(axis=1)
+        work["_surplus"] = surplus_hourly.values
+        monthly = work.groupby("_month")[["_pv", "_demand", "_self"]].sum().reindex(range(1, 13), fill_value=0)
+        monthly["_direct_ss"] = monthly.apply(lambda r: r["_self"] / r["_demand"] * 100 if r["_demand"] > 0 else None, axis=1)
+        monthly["_pv_demand"] = monthly.apply(lambda r: r["_pv"] / r["_demand"] * 100 if r["_demand"] > 0 else None, axis=1)
+        if monthly["_direct_ss"].notna().any():
+            winter_month = int(monthly["_direct_ss"].idxmin())
+            summer_month = int(monthly["_direct_ss"].idxmax())
+            monthly_line = (
+                f"Seasonal signal: direct self-sufficiency ranges from {MONTHS[winter_month - 1]} "
+                f"({_format_number(monthly.loc[winter_month, '_direct_ss'], '%', 1)}) to {MONTHS[summer_month - 1]} "
+                f"({_format_number(monthly.loc[summer_month, '_direct_ss'], '%', 1)})."
+            )
+
+        daily_surplus = work.groupby("_date")["_surplus"].sum()
+        if not daily_surplus.empty:
+            usable_kwh = float(daily_surplus.quantile(0.90))
+            if usable_kwh > 0:
+                low_area = usable_kwh * 0.08
+                high_area = usable_kwh * 0.12
+                room_line = (
+                    f"Battery-ready space screen: a 90th-percentile daily surplus is about {_format_number(usable_kwh, ' kWh', 0)}. "
+                    f"Reserve roughly {low_area:.0f}-{high_area:.0f} m2 near the inverter/main electrical room if short-term storage is kept in the concept."
+                )
+
+    if annual_surplus > annual_pv * 0.15:
+        short_term = "Yes - short-term storage or load shifting is worth planning because a meaningful part of PV generation is exported."
+    elif annual_surplus > annual_pv * 0.03:
+        short_term = "Maybe - keep the electrical room and risers storage-ready, but do not let batteries drive the concept yet."
+    else:
+        short_term = "No strong short-term battery signal - most PV is already used directly by the building."
+
+    if annual_screen < 70 or annual_deficit > annual_demand * 0.35:
+        seasonal = "Seasonal/grid dependency remains. Treat this as grid interaction or district-scale seasonal storage, not a large building battery room."
+    else:
+        seasonal = "Seasonal dependency is moderate. Building-scale daily storage is more relevant than seasonal storage."
+
+    lines = [
+        f"Sources: {pv_source}; {demand_source}.",
+        f"Scale: {scale}.",
+    ]
+    if selected_buildings:
+        lines.append(f"Selected buildings: {', '.join(selected_buildings)}.")
+        lines.append(f"Important scale rule: this storage screen uses selected building/cluster demand files and scaled PV, not district totals.")
+    lines.append(f"Annual PV generation: {_format_number(annual_pv, ' kWh/year')}; annual electricity demand: {_format_number(annual_demand, ' kWh/year')}.")
+    lines.append(f"Annual PV/demand screen before timing losses: {_format_number(annual_screen, '%', 1)}; direct hourly self-sufficiency: {_format_number(direct_ss, '%', 1)}.")
+    lines.append(f"Self-consumption: {_format_number(self_consumption, '%', 1)}; exported surplus: {_format_number(annual_surplus, ' kWh/year')}; grid import after PV: {_format_number(annual_deficit, ' kWh/year')}.")
+    lines.append(f"Peak PV: {_format_number(peak_pv, ' kW', 1)}; peak demand: {_format_number(peak_demand, ' kW', 1)}.")
+    lines.append(f"Short-term storage signal: {short_term}")
+    if monthly_line:
+        lines.append(monthly_line)
+    lines.append(f"Long-term storage signal: {seasonal}")
+    if room_line:
+        lines.append(room_line)
+    lines.append("Interpretation boundary: Storage Necessity owns short-term load shifting and seasonal grid-dependency. Do not present district solar summaries as selected-building storage results.")
     return "\n".join(lines)
 
 
@@ -2634,12 +2827,19 @@ def render_pv_coverage_scenario_tool(cea_data, selected_buildings=None):
     if st.session_state.get("pv_coverage_scenario"):
         st.info("A PV coverage scenario is saved for the Design Integration Recipe. You can adjust the slider and save again to replace it.")
     current = st.session_state.get("pv_coverage_pct", 50)
+    if "pv_coverage_pct_widget" not in st.session_state:
+        st.session_state.pv_coverage_pct_widget = int(current)
+
+    def _commit_pv_coverage_pct():
+        st.session_state.pv_coverage_pct = int(st.session_state.pv_coverage_pct_widget)
+
     coverage = st.select_slider(
         "How much of the recommended facade PV area are you willing to cover?",
         options=list(range(0, 101, 5)),
-        value=int(current),
-        key="pv_coverage_pct"
+        key="pv_coverage_pct_widget",
+        on_change=_commit_pv_coverage_pct
     )
+    coverage = int(st.session_state.get("pv_coverage_pct", coverage))
     st.caption(f"Estimates below use {int(coverage)}% facade PV coverage.")
     values = compute_pv_coverage_scenario_values(cea_data, selected_buildings, coverage)
     if not values:
@@ -2783,7 +2983,9 @@ def compute_compact_metrics(skill_id, cea_data, selected_buildings=None, scale="
     if skill_id == "site-potential--solar-availability--temporal-availability--seasonal-patterns":
         return compute_seasonal_pattern_metrics(cea_data, selected_buildings, scale)
     if skill_id == "site-potential--solar-availability--temporal-availability--daily-patterns":
-        return compute_daily_pattern_metrics(cea_data)
+        return compute_daily_pattern_metrics(cea_data, selected_buildings, scale)
+    if skill_id == "site-potential--solar-availability--temporal-availability--storage-strategy":
+        return compute_storage_necessity_metrics(cea_data, selected_buildings, scale)
     if skill_id == "site-potential--solar-availability--surface-irradiation":
         return compute_surface_irradiation_metrics(cea_data, selected_buildings, scale)
     if skill_id == "site-potential--envelope-suitability":
@@ -4674,10 +4876,11 @@ else:
                           "tree_mode","skill_id","skill_name","analysis_ran",
                           "threshold_result","param_check_hidden",
                           "selected_building","selected_cluster","cached_system_prompt","analysis_log",
-                          "pv_coverage_scenario","pv_coverage_pct"]:
+                          "pv_coverage_scenario","pv_coverage_pct","pv_coverage_pct_widget"]:
                     st.session_state[k] = None if k != "selected_cluster" else []
                 st.session_state.analysis_log = []
                 st.session_state.pv_coverage_pct = 50
+                st.session_state.pv_coverage_pct_widget = 50
                 st.session_state.chat_history = []
                 st.rerun()
 
