@@ -127,12 +127,11 @@ def _pv_surface_pie_chart(cea_data, pv_fname, selected_buildings=None):
     ).properties(title="Roof vs facade PV yield", width=250, height=240)
 
     total_label = alt.Chart(pd.DataFrame({
-        "x": [0], "y": [0],
         "text": [f"Total: {total_mwh:,.1f} MWh/year"]
-    })).mark_text(align="center", baseline="middle", dy=108, fontSize=13, fontWeight="bold", color=C_DEMAND).encode(
-        x=alt.value(125), y=alt.value(120), text="text:N"
-    )
-    group_chart = group_pie + total_label
+    })).mark_text(
+        align="center", baseline="middle", fontSize=13, fontWeight="bold", color=C_DEMAND
+    ).encode(text="text:N").properties(width=250, height=28)
+    group_chart = group_pie & total_label
 
     df_facade = df_surface[df_surface["Group"] == "Facade"].copy()
     if df_facade.empty or facade_mwh <= 0:
@@ -153,18 +152,7 @@ def _pv_surface_pie_chart(cea_data, pv_fname, selected_buildings=None):
         ]
     ).properties(title="Facade yield distribution", width=220, height=240)
 
-    connector_df = pd.DataFrame({
-        "x": [0, 1, 0, 1],
-        "y": [0.42, 0.35, 0.58, 0.65],
-        "line": ["top", "top", "bottom", "bottom"]
-    })
-    connectors = alt.Chart(connector_df).mark_line(color=C_GRID, strokeWidth=1.5).encode(
-        x=alt.X("x:Q", axis=None, scale=alt.Scale(domain=[0, 1])),
-        y=alt.Y("y:Q", axis=None, scale=alt.Scale(domain=[0, 1])),
-        detail="line:N"
-    ).properties(width=65, height=200)
-
-    return group_chart | connectors | facade_pie
+    return group_chart | facade_pie
 
 
 # ── Chart builders ────────────────────────────────────────────────────────────
@@ -990,52 +978,35 @@ def chart_carbon_footprint(cea_data, selected_buildings, output_mode):
     net_tco2 = max(baseline_tco2 - avoided_tco2, 0)
     reduction = avoided_tco2 / baseline_tco2 if baseline_tco2 > 0 else 0
 
-    outer = pd.DataFrame({
-        "Ring": ["Grid electricity baseline"],
-        "Segment": ["Grid electricity baseline"],
-        "tCO2/year": [baseline_tco2],
-        "Share": [1.0],
-    })
-    inner = pd.DataFrame({
-        "Ring": ["After BIPV", "After BIPV"],
-        "Segment": ["Avoided by BIPV", "Net after BIPV"],
-        "tCO2/year": [avoided_tco2, net_tco2],
-        "Share": [avoided_tco2 / baseline_tco2 if baseline_tco2 else 0,
-                  net_tco2 / baseline_tco2 if baseline_tco2 else 0],
+    df_chart = pd.DataFrame({
+        "Case": ["Without BIPV", "With BIPV", "With BIPV"],
+        "Segment": ["Grid electricity baseline", "Avoided by BIPV", "With BIPV carbon emissions"],
+        "tCO2/year": [baseline_tco2, avoided_tco2, net_tco2],
+        "Order": [0, 0, 1],
     })
 
-    outer_ring = alt.Chart(outer).mark_arc(radius=118, radius2=92).encode(
-        theta=alt.Theta("tCO2/year:Q"),
-        color=alt.Color("Segment:N", scale=alt.Scale(domain=["Grid electricity baseline"], range=[C_DEMAND]),
-                        legend=alt.Legend(title="Outer ring")),
-        tooltip=[
-            alt.Tooltip("Segment:N"),
-            alt.Tooltip("tCO2/year:Q", format=",.1f"),
-            alt.Tooltip("Share:Q", format=".1%")
-        ]
-    )
-    inner_pie = alt.Chart(inner).mark_arc(radius=84, radius2=20).encode(
-        theta=alt.Theta("tCO2/year:Q"),
+    chart = alt.Chart(df_chart).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
+        x=alt.X("Case:N", title="", sort=["Without BIPV", "With BIPV"], axis=alt.Axis(labelAngle=0)),
+        y=alt.Y("tCO2/year:Q", title="tCO2/year", stack="zero"),
         color=alt.Color(
             "Segment:N",
-            scale=alt.Scale(domain=["Avoided by BIPV", "Net after BIPV"], range=[C_SURPLUS, C_CARBON]),
-            legend=alt.Legend(title="Inner ring")
+            scale=alt.Scale(
+                domain=["Grid electricity baseline", "Avoided by BIPV", "With BIPV carbon emissions"],
+                range=[C_DEMAND, C_SURPLUS, C_CARBON]
+            ),
+            legend=alt.Legend(title="")
         ),
+        order=alt.Order("Order:Q"),
         tooltip=[
+            alt.Tooltip("Case:N"),
             alt.Tooltip("Segment:N"),
             alt.Tooltip("tCO2/year:Q", format=",.1f"),
-            alt.Tooltip("Share:Q", format=".1%")
-        ]
+        ],
+    ).properties(
+        title=f"Electricity carbon footprint — BIPV avoids {reduction:.0%}",
+        height=260
     )
-    center = alt.Chart(pd.DataFrame({"text": [f"{reduction:.0%}\navoided"]})).mark_text(
-        align="center", baseline="middle", fontSize=13, fontWeight="bold", color=C_DEMAND
-    ).encode(text="text:N")
-
-    return (outer_ring + inner_pie + center).properties(
-        title="Electricity carbon footprint: baseline vs after BIPV",
-        width=360,
-        height=300
-    )
+    return chart
 
 
 def chart_carbon(cea_data, selected_buildings, output_mode):
@@ -1388,3 +1359,4 @@ def render_skill_chart(skill_id, cea_data, selected_buildings, output_mode):
         return fn(cea_data, selected_buildings, output_mode)
     except Exception:
         return None
+
