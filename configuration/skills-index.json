@@ -171,22 +171,9 @@
       "display_name": "Cost Analysis",
       "position_in_tree": [
         "Impact and Viability",
-        "Economic Viability",
         "Cost Analysis"
       ],
-      "tooltip": "What does this BIPV system cost to install, and how does that compare across panel types and surfaces?",
-      "data_source": "CEA + calculation",
-      "status": "complete"
-    },
-    {
-      "id": "impact-and-viability--economic-viability--investment-payback",
-      "display_name": "Payback Period",
-      "position_in_tree": [
-        "Impact and Viability",
-        "Economic Viability",
-        "Payback Period"
-      ],
-      "tooltip": "How long does it take for energy savings to recover the installation cost of this BIPV system?",
+      "tooltip": "What does BIPV cost, when does it pay back, and is its electricity cheaper than the grid?",
       "data_source": "CEA + calculation",
       "status": "complete"
     },
@@ -214,4 +201,5 @@
     }
   ]
 }
+
 
