@@ -34,11 +34,18 @@ def _base_theme():
 
 def _find_col(df, *keywords):
     """Return first column whose name contains any of the keywords."""
+    if df is None:
+        return None
     for kw in keywords:
         match = next((c for c in df.columns if kw.lower() in c.lower()), None)
         if match:
             return match
     return None
+
+
+def _num(series):
+    """Numeric series with bad/missing values treated as zero."""
+    return pd.to_numeric(series, errors="coerce").fillna(0)
 
 def _season_col(df):
     """Return the real season label column, avoiding period_hour metadata."""
@@ -82,20 +89,149 @@ def _pv_surface_generation_rows(cea_data, pv_fname, selected_buildings=None):
     if df_b.empty:
         return []
 
-    surface_cols = [
-        ("Roof", "Roof", "PV_roofs_top_E_kWh"),
-        ("Facade", "South facade", "PV_walls_south_E_kWh"),
-        ("Facade", "East facade", "PV_walls_east_E_kWh"),
-        ("Facade", "West facade", "PV_walls_west_E_kWh"),
-        ("Facade", "North facade", "PV_walls_north_E_kWh"),
+    def energy_col_for(surface_key):
+        key = surface_key.lower()
+        exact_patterns = {
+            "roof": ["pv_roofs_top_e_kwh", "pv_roofs_e_kwh", "roof_e_kwh"],
+            "south": ["pv_walls_south_e_kwh", "wall_south_e_kwh", "walls_south_e_kwh"],
+            "east": ["pv_walls_east_e_kwh", "wall_east_e_kwh", "walls_east_e_kwh"],
+            "west": ["pv_walls_west_e_kwh", "wall_west_e_kwh", "walls_west_e_kwh"],
+            "north": ["pv_walls_north_e_kwh", "wall_north_e_kwh", "walls_north_e_kwh"],
+        }
+        lowered = {c.lower(): c for c in df_b.columns}
+        for pattern in exact_patterns[key]:
+            if pattern in lowered:
+                return lowered[pattern]
+
+        for col in df_b.columns:
+            low = col.lower()
+            if "m2" in low or "area" in low:
+                continue
+            if "kwh" not in low and "_e_" not in low and not low.endswith("_e"):
+                continue
+            if key == "roof" and "roof" in low:
+                return col
+            if key != "roof" and key in low and ("wall" in low or "facade" in low):
+                return col
+        return None
+
+    surface_specs = [
+        ("Roof", "Roof", "roof"),
+        ("Facade", "South facade", "south"),
+        ("Facade", "East facade", "east"),
+        ("Facade", "West facade", "west"),
+        ("Facade", "North facade", "north"),
     ]
     rows = []
-    for group, surface, col in surface_cols:
-        if col in df_b.columns:
+    for group, surface, surface_key in surface_specs:
+        col = energy_col_for(surface_key)
+        if col:
             kwh = pd.to_numeric(df_b[col], errors="coerce").fillna(0).sum()
             if kwh > 0:
                 rows.append({"Group": group, "Surface": surface, "kWh": float(kwh), "MWh": float(kwh) / 1000})
     return rows
+
+
+def _pv_surface_area_rows(cea_data, pv_fname, selected_buildings=None):
+    """Return active PV area by roof and facade orientation from *_total_buildings.csv."""
+    bldg_fname = pv_fname.replace("_total.csv", "_total_buildings.csv")
+    df_b = cea_data["files"].get(bldg_fname)
+    if df_b is None or df_b.empty:
+        return []
+    df_b = df_b.copy()
+    name_col = _find_col(df_b, "name", "Name", "building")
+    if selected_buildings and name_col:
+        df_b = df_b[df_b[name_col].isin(selected_buildings)]
+    if df_b.empty:
+        return []
+
+    def area_col_for(surface_key):
+        key = surface_key.lower()
+        exact_patterns = {
+            "roof": ["pv_roofs_top_m2", "pv_roofs_m2", "roof_m2"],
+            "south": ["pv_walls_south_m2", "wall_south_m2", "walls_south_m2"],
+            "east": ["pv_walls_east_m2", "wall_east_m2", "walls_east_m2"],
+            "west": ["pv_walls_west_m2", "wall_west_m2", "walls_west_m2"],
+            "north": ["pv_walls_north_m2", "wall_north_m2", "walls_north_m2"],
+        }
+        lowered = {c.lower(): c for c in df_b.columns}
+        for pattern in exact_patterns[key]:
+            if pattern in lowered:
+                return lowered[pattern]
+        for col in df_b.columns:
+            low = col.lower()
+            if "m2" not in low:
+                continue
+            if key == "roof" and "roof" in low:
+                return col
+            if key != "roof" and key in low and ("wall" in low or "facade" in low):
+                return col
+        return None
+
+    surface_specs = [
+        ("Roof", "Roof", "roof"),
+        ("Facade", "South facade", "south"),
+        ("Facade", "East facade", "east"),
+        ("Facade", "West facade", "west"),
+        ("Facade", "North facade", "north"),
+    ]
+    rows = []
+    for group, surface, surface_key in surface_specs:
+        col = area_col_for(surface_key)
+        if col:
+            area = pd.to_numeric(df_b[col], errors="coerce").fillna(0).sum()
+            if area > 0:
+                rows.append({"Group": group, "Surface": surface, "Area (m2)": float(area)})
+    return rows
+
+
+def _economic_price_for_chart(cea_data):
+    """Small local tariff assumption used only for chart estimates."""
+    location_text = " ".join(str(v) for v in cea_data.get("files", {}).keys()).lower()
+    weather_header = cea_data["files"].get("weather_header.txt")
+    if weather_header is not None:
+        try:
+            location_text += " " + str(weather_header).lower()
+        except Exception:
+            pass
+    if any(token in location_text for token in ["zug", "zurich", "switzerland", "che"]):
+        return 0.29, "CHF/kWh"
+    return 0.28, "currency/kWh"
+
+
+def _panel_costs_for_chart(cea_data):
+    panel_df = cea_data["files"].get("PHOTOVOLTAIC_PANELS.csv")
+    roof_cost = 254.7
+    facade_cost = 345.7
+    if panel_df is not None and not panel_df.empty:
+        try:
+            roof_col = _find_col(panel_df, "cost_roof", "roof_cost", "roof")
+            facade_col = _find_col(panel_df, "cost_facade", "facade_cost", "facade")
+            generic_col = _find_col(panel_df, "cost", "Cost", "CAPEX", "price")
+            if roof_col:
+                roof_cost = float(panel_df[roof_col].iloc[0])
+            elif generic_col:
+                roof_cost = float(panel_df[generic_col].iloc[0])
+            if facade_col:
+                facade_cost = float(panel_df[facade_col].iloc[0])
+            elif generic_col:
+                facade_cost = float(panel_df[generic_col].iloc[0])
+        except Exception:
+            pass
+    return roof_cost, facade_cost
+
+
+def _panel_embodied_carbon_kg_m2(cea_data):
+    panel_df = cea_data["files"].get("PHOTOVOLTAIC_PANELS.csv")
+    embodied = 329.0
+    if panel_df is not None and not panel_df.empty:
+        em_col = _find_col(panel_df, "CO2", "embodied", "carbon", "GHG")
+        if em_col:
+            try:
+                embodied = float(panel_df[em_col].iloc[0])
+            except Exception:
+                pass
+    return embodied
 
 
 def _pv_surface_pie_chart(cea_data, pv_fname, selected_buildings=None):
@@ -378,7 +514,7 @@ def chart_solar_irradiation(cea_data, selected_buildings, output_mode):
         "West wall":   next((c for c in df_b.columns if "west" in c.lower() and "window" not in c.lower()), None),
         "North wall":  next((c for c in df_b.columns if "north" in c.lower() and "window" not in c.lower()), None),
     }
-    found = {k: v for k, v in surface_map.items() if v is not None and df_b[v].sum() > 0}
+    found = {k: v for k, v in surface_map.items() if v is not None and _num(df_b[v]).sum() > 0}
 
     if not found:
         # Fallback: use first kWh column found
@@ -400,7 +536,7 @@ def chart_solar_irradiation(cea_data, selected_buildings, output_mode):
             rows.append({
                 "building": row[name_col],
                 "surface": surface,
-                "kWh": float(row[col]) if row[col] == row[col] else 0
+                "kWh": float(pd.to_numeric(pd.Series([row[col]]), errors="coerce").fillna(0).iloc[0])
             })
     import pandas as pd_inner
     df_long = pd_inner.DataFrame(rows)
@@ -937,82 +1073,81 @@ def _pv_scope_from_first_total(cea_data, selected_buildings):
 
 def chart_carbon_footprint(cea_data, selected_buildings, output_mode):
     """
-    Electricity carbon footprint: baseline grid electricity vs BIPV avoided carbon.
+    Lifecycle carbon decomposition: embodied carbon, replaced material credit, and operational savings.
     """
-    pv_fname = next((k for k in cea_data["files"]
-                     if k.startswith("PV_PV") and "_total.csv" in k
-                     and "buildings" not in k), None)
-    if pv_fname is None:
+    scope = _pv_scope_from_first_total(cea_data, selected_buildings)
+    if scope is None:
         return None
 
-    df_pv = cea_data["files"][pv_fname].copy()
-    gen_col = _find_col(df_pv, "E_PV_gen", "E_PV", "gen")
-    if gen_col is None:
+    annual_gen_kwh = scope["annual_kwh"]
+    total_area = scope["area_m2"]
+    if annual_gen_kwh <= 0 or not total_area or total_area <= 0:
         return None
 
-    district_annual = pd.to_numeric(df_pv[gen_col], errors="coerce").fillna(0).sum()
-    pv_scale = 1.0
-    if selected_buildings:
-        bldg_fname = pv_fname.replace("_total.csv", "_total_buildings.csv")
-        df_b = cea_data["files"].get(bldg_fname)
-        name_col = _find_col(df_b, "name", "Name", "building") if df_b is not None else None
-        gen_b_col = _find_col(df_b, "E_PV_gen", "E_PV", "gen") if df_b is not None else None
-        if df_b is not None and name_col and gen_b_col:
-            selected_df = df_b[df_b[name_col].isin(selected_buildings)]
-            selected_annual = pd.to_numeric(selected_df[gen_b_col], errors="coerce").fillna(0).sum()
-            if district_annual > 0 and selected_annual > 0:
-                pv_scale = float(selected_annual / district_annual)
+    embodied_tco2 = _panel_embodied_carbon_kg_m2(cea_data) * total_area / 1000
+    # Conservative material replacement credit when no project-specific cladding EPD is supplied.
+    displaced_material_tco2 = 35.0 * total_area / 1000
+    annual_operational_saving_tco2 = annual_gen_kwh * _grid_carbon_factor_kgco2_kwh(cea_data) / 1000
+    lifetime_years = 25
+    lifetime_saving_tco2 = annual_operational_saving_tco2 * lifetime_years
 
-    pv_hourly = pd.to_numeric(df_pv[gen_col], errors="coerce").fillna(0).reset_index(drop=True) * pv_scale
-    demand_hourly = _demand_series_for_scope(cea_data, selected_buildings)
-    if demand_hourly is None or len(demand_hourly) == 0:
-        return None
-
-    n = min(len(pv_hourly), len(demand_hourly))
-    pv_hourly = pv_hourly.iloc[:n].reset_index(drop=True)
-    demand_hourly = demand_hourly.iloc[:n].reset_index(drop=True)
-
-    grid_carbon = _grid_carbon_factor_kgco2_kwh(cea_data)
-    baseline_tco2 = float(demand_hourly.sum() * grid_carbon / 1000)
-    avoided_tco2 = float(pd.concat([pv_hourly, demand_hourly], axis=1).min(axis=1).sum() * grid_carbon / 1000)
-    net_tco2 = max(baseline_tco2 - avoided_tco2, 0)
-    reduction = avoided_tco2 / baseline_tco2 if baseline_tco2 > 0 else 0
-
-    df_chart = pd.DataFrame({
-        "Case": ["Without BIPV", "With BIPV", "With BIPV"],
-        "Segment": ["Grid electricity baseline", "Avoided by BIPV", "With BIPV carbon emissions"],
-        "tCO2/year": [baseline_tco2, avoided_tco2, net_tco2],
-        "Order": [0, 0, 1],
+    steps = [
+        ("BIPV embodied carbon", embodied_tco2),
+        ("Displaced material credit", -displaced_material_tco2),
+        ("Operational savings (25 yr)", -lifetime_saving_tco2),
+    ]
+    cumulative = 0.0
+    rows = []
+    for label, change in steps:
+        start = cumulative
+        end = cumulative + change
+        rows.append({
+            "Step": label,
+            "Start": min(start, end),
+            "End": max(start, end),
+            "Change": change,
+            "Type": "Carbon added" if change >= 0 else "Carbon credit",
+            "Display": abs(change),
+        })
+        cumulative = end
+    rows.append({
+        "Step": "Net lifecycle balance",
+        "Start": min(0, cumulative),
+        "End": max(0, cumulative),
+        "Change": cumulative,
+        "Type": "Net balance",
+        "Display": abs(cumulative),
     })
+    df_chart = pd.DataFrame(rows)
 
     chart = alt.Chart(df_chart).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
-        x=alt.X("Case:N", title="", sort=["Without BIPV", "With BIPV"], axis=alt.Axis(labelAngle=0)),
-        y=alt.Y("tCO2/year:Q", title="tCO2/year", stack="zero"),
+        x=alt.X("Step:N", title="", sort=[row["Step"] for row in rows], axis=alt.Axis(labelAngle=-18)),
+        y=alt.Y("Start:Q", title="tCO2e over 25 years"),
+        y2="End:Q",
         color=alt.Color(
-            "Segment:N",
+            "Type:N",
             scale=alt.Scale(
-                domain=["Grid electricity baseline", "Avoided by BIPV", "With BIPV carbon emissions"],
-                range=[C_DEMAND, C_SURPLUS, C_CARBON]
+                domain=["Carbon added", "Carbon credit", "Net balance"],
+                range=[C_CARBON, C_SURPLUS, C_DEMAND]
             ),
             legend=alt.Legend(title="")
         ),
-        order=alt.Order("Order:Q"),
         tooltip=[
-            alt.Tooltip("Case:N"),
-            alt.Tooltip("Segment:N"),
-            alt.Tooltip("tCO2/year:Q", format=",.1f"),
+            alt.Tooltip("Step:N"),
+            alt.Tooltip("Change:Q", title="Signed tCO2e", format=",.1f"),
+            alt.Tooltip("Display:Q", title="Absolute tCO2e", format=",.1f"),
         ],
     ).properties(
-        title=f"Electricity carbon footprint — BIPV avoids {reduction:.0%}",
-        height=260
+        title="Carbon footprint decomposition: embodied vs replaced material vs operational savings",
+        height=300
     )
-    return chart
+    zero = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(color=C_NEUTRAL, strokeDash=[4, 4]).encode(y="y:Q")
+    return chart + zero
 
 
 def chart_carbon(cea_data, selected_buildings, output_mode):
     """
-    Carbon impact skills.
-    All modes → carbon payback timeline bar/line combo
+    Carbon payback period: break-even timeline.
     """
     scope = _pv_scope_from_first_total(cea_data, selected_buildings)
     if scope is None:
@@ -1024,16 +1159,7 @@ def chart_carbon(cea_data, selected_buildings, output_mode):
 
     em_grid = _grid_carbon_factor_kgco2_kwh(cea_data)
 
-    # Estimate embodied carbon — use PV panel data if available
-    panel_df = cea_data["files"].get("PHOTOVOLTAIC_PANELS.csv")
-    em_bipv = 329.0  # default cSi kgCO2/m2
-    if panel_df is not None:
-        em_col2 = _find_col(panel_df, "CO2", "embodied", "carbon", "GHG")
-        if em_col2:
-            try:
-                em_bipv = float(panel_df[em_col2].iloc[0])
-            except Exception:
-                pass
+    em_bipv = _panel_embodied_carbon_kg_m2(cea_data)
 
     total_area = scope["area_m2"]
     if not total_area or total_area <= 0:
@@ -1046,149 +1172,139 @@ def chart_carbon(cea_data, selected_buildings, output_mode):
 
     payback_yr = embodied_total / annual_avoided
     years = list(range(0, 26))
+    embodied_tco2 = embodied_total / 1000
     cumulative_avoided = [annual_avoided * y / 1000 for y in years]
-    embodied_line = [embodied_total / 1000] * len(years)
+    carbon_debt = [max(embodied_tco2 - value, 0) for value in cumulative_avoided]
 
-    df_payback = pd.DataFrame({
-        "Year": years,
-        "Cumulative avoided (tCO₂)": cumulative_avoided,
-        "Embodied carbon (tCO₂)": embodied_line,
-    })
+    df_payback = pd.DataFrame({"Year": years, "Cumulative operational savings": cumulative_avoided, "Carbon debt remaining": carbon_debt})
+    df_long = df_payback.melt("Year", var_name="Series", value_name="tCO2")
 
-    avoided_line = alt.Chart(df_payback).mark_line(
-        color=C_SURPLUS, strokeWidth=2
-    ).encode(
+    chart = alt.Chart(df_long).mark_line(point=True, strokeWidth=2).encode(
         x=alt.X("Year:Q", title="Years of operation"),
-        y=alt.Y("Cumulative avoided (tCO₂):Q", title="tCO₂"),
-        tooltip=["Year", alt.Tooltip("Cumulative avoided (tCO₂):Q", format=".1f")]
+        y=alt.Y("tCO2:Q", title="tCO2e"),
+        color=alt.Color(
+            "Series:N",
+            scale=alt.Scale(
+                domain=["Carbon debt remaining", "Cumulative operational savings"],
+                range=[C_CARBON, C_SURPLUS]
+            ),
+            legend=alt.Legend(title="")
+        ),
+        tooltip=[
+            alt.Tooltip("Year:Q"),
+            alt.Tooltip("Series:N"),
+            alt.Tooltip("tCO2:Q", format=",.1f"),
+        ],
+    ).properties(
+        title=f"Carbon break-even — payback after {payback_yr:.1f} years",
+        height=280
     )
-    embodied = alt.Chart(df_payback).mark_line(
-        color=C_CARBON, strokeDash=[6, 3], strokeWidth=1.5
+
+    payback_rule = alt.Chart(pd.DataFrame({"Year": [min(payback_yr, 25)]})).mark_rule(
+        color=C_DEMAND, strokeDash=[4, 4]
     ).encode(
         x="Year:Q",
-        y=alt.Y("Embodied carbon (tCO₂):Q"),
-        tooltip=[alt.Tooltip("Embodied carbon (tCO₂):Q", format=".1f")]
+        tooltip=[alt.Tooltip("Year:Q", title="Payback year", format=".1f")]
     )
-
-    title = f"Carbon payback — est. {payback_yr:.1f} years"
-    chart = (avoided_line + embodied).properties(title=title, height=220)
-
-    if output_mode == "Key takeaway":
-        return chart
-
-    # Explain numbers / Design impl — add compact summary alongside
-    df_annual = pd.DataFrame({
-        "Category": ["Embodied carbon", "Annual avoided"],
-        "tCO₂": [embodied_total / 1000, annual_avoided / 1000],
-        "color": [C_CARBON, C_SURPLUS]
-    })
-    bar = alt.Chart(df_annual).mark_bar(cornerRadiusTopLeft=3,
-                                         cornerRadiusTopRight=3).encode(
-        x=alt.X("Category:N", title=""),
-        y=alt.Y("tCO₂:Q", title="tCO₂"),
-        color=alt.Color("color:N", scale=None, legend=None),
-        tooltip=["Category", alt.Tooltip("tCO₂:Q", format=".1f")]
-    ).properties(title="Carbon summary", height=220)
-
-    return chart | bar
+    return chart + payback_rule
 
 
 def chart_economic(cea_data, selected_buildings, output_mode):
     """
-    Economic viability skills.
-    Key takeaway     → simple payback bar (cost vs savings)
-    Explain numbers  → cumulative cashflow line over 25yr
-    Design impl.     → cumulative cashflow + cost breakdown
+    Cost analysis: payback period and LCOE vs grid price by active PV surface.
     """
     scope = _pv_scope_from_first_total(cea_data, selected_buildings)
     if scope is None:
         return None
 
-    annual_gen_kwh = scope["annual_kwh"]
-    total_area = scope["area_m2"]
-    if not total_area or total_area <= 0:
+    pv_fname = scope["pv_fname"]
+    generation_rows = _pv_surface_generation_rows(cea_data, pv_fname, selected_buildings)
+    area_rows = _pv_surface_area_rows(cea_data, pv_fname, selected_buildings)
+    if not generation_rows:
         return None
 
-    # Rough cost estimate — read from panel data if available
-    panel_df = cea_data["files"].get("PHOTOVOLTAIC_PANELS.csv")
-    cost_per_m2 = 254.0  # default €/m2 (PV1 roof from McCarty)
-    roof_cost_m2 = facade_cost_m2 = None
-    if panel_df is not None and not panel_df.empty:
-        roof_col = _find_col(panel_df, "cost_roof", "roof")
-        facade_col = _find_col(panel_df, "cost_facade", "facade")
-        cost_col = _find_col(panel_df, "cost", "Cost", "CAPEX", "price")
-        try:
-            roof_cost_m2 = float(panel_df[roof_col].iloc[0]) if roof_col else None
-            facade_cost_m2 = float(panel_df[facade_col].iloc[0]) if facade_col else None
-            if cost_col:
-                cost_per_m2 = float(panel_df[cost_col].iloc[0])
-        except Exception:
-            pass
+    df_gen = pd.DataFrame(generation_rows)
+    df_area = pd.DataFrame(area_rows) if area_rows else pd.DataFrame(columns=["Surface", "Area (m2)"])
+    df = df_gen.merge(df_area[["Surface", "Area (m2)"]], on="Surface", how="left")
+    if df["Area (m2)"].isna().all():
+        total_area = scope["area_m2"] or 0
+        total_gen = df["kWh"].sum()
+        if total_area > 0 and total_gen > 0:
+            df["Area (m2)"] = df["kWh"] / total_gen * total_area
+    df = df.dropna(subset=["Area (m2)"])
+    df = df[(df["Area (m2)"] > 0) & (df["kWh"] > 0)]
+    if df.empty:
+        return None
 
-    electricity_price = 0.28  # €/kWh typical CH
-    if roof_cost_m2 is not None and facade_cost_m2 is not None and (scope["roof_area_m2"] + scope["facade_area_m2"]) > 0:
-        total_cost = scope["roof_area_m2"] * roof_cost_m2 + scope["facade_area_m2"] * facade_cost_m2
-    else:
-        total_cost = cost_per_m2 * total_area
-    annual_savings = annual_gen_kwh * electricity_price
-    payback_yr = total_cost / annual_savings if annual_savings > 0 else 25
+    roof_cost_m2, facade_cost_m2 = _panel_costs_for_chart(cea_data)
+    grid_price, price_unit = _economic_price_for_chart(cea_data)
+    lifetime_years = 25
+    discount_rate = 0.05
+    o_and_m_rate = 0.01
+    crf = (discount_rate * (1 + discount_rate) ** lifetime_years) / (((1 + discount_rate) ** lifetime_years) - 1)
 
-    years = list(range(0, 26))
-    cashflow = [-total_cost + annual_savings * y for y in years]
-
-    df_cf = pd.DataFrame({"Year": years, "Cumulative cashflow (€)": cashflow})
-    df_cf["positive"] = df_cf["Cumulative cashflow (€)"] >= 0
-
-    if output_mode == "Key takeaway":
-        df_sum = pd.DataFrame({
-            "Item": ["Estimated investment", "Annual energy value", "25-year energy value"],
-            "€": [total_cost, annual_savings, annual_savings * 25],
-        })
-        df_sum["bar_color"] = df_sum["Item"].apply(
-            lambda item: C_CARBON if item == "Estimated investment" else C_SURPLUS
-        )
-        bar = alt.Chart(df_sum).mark_bar(cornerRadiusTopLeft=3,
-                                          cornerRadiusTopRight=3).encode(
-            x=alt.X("Item:N", title=""),
-            y=alt.Y("€:Q", title="€"),
-            color=alt.Color("bar_color:N", scale=None, legend=None),
-            tooltip=["Item", alt.Tooltip("€:Q", format=",.0f")]
-        ).properties(title=f"Economic summary — est. payback {payback_yr:.1f} yr",
-                     height=200)
-        return bar
-
-    # Explain numbers / Design impl — cashflow line
-    line = alt.Chart(df_cf).mark_line(strokeWidth=2).encode(
-        x=alt.X("Year:Q", title="Years"),
-        y=alt.Y("Cumulative cashflow (€):Q", title="€"),
-        color=alt.condition(
-            alt.datum.positive,
-            alt.value(C_SURPLUS), alt.value(C_CARBON)
-        ),
-        tooltip=["Year", alt.Tooltip("Cumulative cashflow (€):Q", format=",.0f")]
+    df["Cost/m2"] = df["Group"].apply(lambda group: roof_cost_m2 if group == "Roof" else facade_cost_m2)
+    df["Investment"] = df["Area (m2)"] * df["Cost/m2"]
+    df["Annual value"] = df["kWh"] * grid_price
+    df["Payback period (years)"] = df["Investment"] / df["Annual value"]
+    df["LCOE"] = (df["Investment"] * (crf + o_and_m_rate)) / df["kWh"]
+    df = df[
+        df["Payback period (years)"].notna()
+        & df["LCOE"].notna()
+        & (df["Payback period (years)"] < 1_000_000)
+        & (df["LCOE"] < 1_000_000)
+    ]
+    if df.empty:
+        return None
+    df["Surface"] = pd.Categorical(
+        df["Surface"],
+        categories=["Roof", "South facade", "East facade", "West facade", "North facade"],
+        ordered=True
     )
-    zero = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(
-        color=C_NEUTRAL, strokeDash=[4, 4]
-    ).encode(y="y:Q")
+    df = df.sort_values("Surface")
 
-    chart = (line + zero).properties(
-        title=f"Cumulative cashflow over 25 years (payback ~{payback_yr:.1f} yr)",
-        height=220
+    color_domain = ["Roof", "South facade", "East facade", "West facade", "North facade"]
+    color_range = [C_PV, C_SURPLUS, "#e8b86d", "#a8d5b5", C_NEUTRAL]
+
+    payback = alt.Chart(df).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
+        x=alt.X("Surface:N", title="", sort=color_domain, axis=alt.Axis(labelAngle=-25)),
+        y=alt.Y("Payback period (years):Q", title="Years"),
+        color=alt.Color("Surface:N", scale=alt.Scale(domain=color_domain, range=color_range), legend=None),
+        tooltip=[
+            alt.Tooltip("Surface:N"),
+            alt.Tooltip("Payback period (years):Q", format=".1f"),
+            alt.Tooltip("Investment:Q", title="Investment", format=",.0f"),
+            alt.Tooltip("Annual value:Q", title="Annual value", format=",.0f"),
+        ],
+    ).properties(title="Simple payback period by PV surface", height=260)
+
+    lifetime_rule = alt.Chart(pd.DataFrame({"y": [25], "Label": ["25-year panel lifetime"]})).mark_rule(
+        color=C_DEMAND, strokeDash=[5, 4]
+    ).encode(
+        y="y:Q",
+        tooltip=[alt.Tooltip("Label:N")]
     )
-    if output_mode == "Explain the numbers":
-        df_cost = pd.DataFrame({
-            "Category": ["Estimated investment", "Annual energy value"],
-            "€": [total_cost, annual_savings],
-            "bar_color": [C_CARBON, C_SURPLUS],
-        })
-        cost_bar = alt.Chart(df_cost).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
-            x=alt.X("Category:N", title="", axis=alt.Axis(labelAngle=0)),
-            y=alt.Y("€:Q", title="€"),
-            color=alt.Color("bar_color:N", scale=None, legend=None),
-            tooltip=["Category", alt.Tooltip("€:Q", format=",.0f")]
-        ).properties(title="Investment and annual value", height=220)
-        return cost_bar | chart
-    return chart
+
+    lcoe = alt.Chart(df).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
+        x=alt.X("Surface:N", title="", sort=color_domain, axis=alt.Axis(labelAngle=-25)),
+        y=alt.Y("LCOE:Q", title=price_unit),
+        color=alt.Color("Surface:N", scale=alt.Scale(domain=color_domain, range=color_range), legend=None),
+        tooltip=[
+            alt.Tooltip("Surface:N"),
+            alt.Tooltip("LCOE:Q", title=f"LCOE ({price_unit})", format=".3f"),
+            alt.Tooltip("kWh:Q", title="Generation (kWh/year)", format=",.0f"),
+            alt.Tooltip("Area (m2):Q", title="PV area (m2)", format=",.1f"),
+        ],
+    ).properties(title="LCOE by PV surface vs grid price", height=260)
+
+    grid_rule = alt.Chart(pd.DataFrame({"y": [grid_price], "Label": [f"Grid price: {grid_price:.2f} {price_unit}"]})).mark_rule(
+        color=C_CARBON, strokeDash=[5, 4]
+    ).encode(
+        y="y:Q",
+        tooltip=[alt.Tooltip("Label:N")]
+    )
+
+    return (payback + lifetime_rule) | (lcoe + grid_rule)
 
 
 def chart_seasonal_patterns(cea_data, selected_buildings, output_mode):
@@ -1359,4 +1475,5 @@ def render_skill_chart(skill_id, cea_data, selected_buildings, output_mode):
         return fn(cea_data, selected_buildings, output_mode)
     except Exception:
         return None
+
 
