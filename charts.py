@@ -1346,7 +1346,7 @@ def chart_seasonal_patterns(cea_data, selected_buildings, output_mode):
             rows.append({
                 "Season": str(season).strip().title(),
                 "Surface": surface,
-                "Irradiation (kWh)": float(group[col].sum())
+                "Irradiation (kWh)": float(_num(group[col]).sum())
             })
     df_long = pd.DataFrame(rows)
 
@@ -1407,7 +1407,7 @@ def chart_daily_patterns(cea_data, selected_buildings, output_mode):
             rows.append({
                 "Hour": row["_hour"],
                 "Surface": surface,
-                "Irradiation (kWh)": float(row[col]) if row[col] == row[col] else 0
+                "Irradiation (kWh)": float(pd.to_numeric(pd.Series([row[col]]), errors="coerce").fillna(0).iloc[0])
             })
     df_long = pd.DataFrame(rows)
     df_long = (
@@ -1471,9 +1471,4 @@ def render_skill_chart(skill_id, cea_data, selected_buildings, output_mode):
     fn = SKILL_CHART_MAP.get(skill_id)
     if fn is None:
         return None
-    try:
-        return fn(cea_data, selected_buildings, output_mode)
-    except Exception:
-        return None
-
-
+    return fn(cea_data, selected_buildings, output_mode)
