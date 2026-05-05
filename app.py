@@ -2405,6 +2405,8 @@ def compute_basic_economic_project_screen(cea_data, selected_buildings=None):
         n = min(len(demand_hourly), len(pv_hourly))
         self_consumed_kwh = float(pd.concat([pv_hourly.iloc[:n], demand_hourly.iloc[:n]], axis=1).min(axis=1).sum())
         exported_kwh = max(annual_pv_kwh - self_consumed_kwh, 0.0)
+        if annual_pv_kwh > 0 and exported_kwh < annual_pv_kwh * 0.01:
+            exported_kwh = 0.0
         self_consumption_note = f"hourly overlap of scaled PV generation and {demand_source}"
     else:
         self_consumed_kwh = None
@@ -2456,7 +2458,7 @@ def compute_basic_economic_project_screen(cea_data, selected_buildings=None):
     annual_value = None
     if self_consumed_kwh is not None and tariff is not None:
         annual_value = self_consumed_kwh * tariff
-        if exported_kwh is not None and export_comp is not None:
+        if exported_kwh is not None and exported_kwh > 0 and export_comp is not None:
             annual_value += exported_kwh * float(export_comp)
 
     payback_lo = payback_hi = None
@@ -2477,14 +2479,20 @@ def compute_basic_economic_project_screen(cea_data, selected_buildings=None):
             f"- Hourly self-consumption estimate: {_format_number(self_consumed_kwh, ' kWh/year')} "
             f"({_format_number(sc_pct, '% of PV generation', 1)}) from {self_consumption_note}."
         )
-        lines.append(f"- Exported surplus estimate: {_format_number(exported_kwh, ' kWh/year')}.")
+        if exported_kwh and exported_kwh > 0:
+            lines.append(f"- Exported surplus estimate: {_format_number(exported_kwh, ' kWh/year')}.")
+        else:
+            lines.append("- Exported surplus estimate: none detected from hourly PV-demand overlap.")
     if investment_lo is not None and investment_hi is not None:
         lines.append(
             f"- Installed BIPV investment screen: {sym} {_format_number(investment_lo, '', 0)}–{sym} {_format_number(investment_hi, '', 0)} "
             f"(roof {sym} {roof_cost_lo}–{sym} {roof_cost_hi}/m2; facade {sym} {facade_cost_lo}–{sym} {facade_cost_hi}/m2)."
         )
     if tariff is not None:
-        export_text = f"; export compensation {sym} {float(export_comp):.2f}/kWh" if export_comp is not None else "; export value not hardcoded"
+        if exported_kwh and exported_kwh > 0 and export_comp is not None:
+            export_text = f"; export compensation {sym} {float(export_comp):.2f}/kWh applied only to detected exported PV"
+        else:
+            export_text = "; no export value added because no exported surplus was detected"
         lines.append(f"- Value assumptions: electricity tariff {sym} {tariff:.2f}/kWh ({tariff_note}){export_text}.")
     if annual_value is not None:
         lines.append(f"- Estimated annual electricity value: {sym} {_format_number(annual_value, '', 0)}/year.")
@@ -2639,6 +2647,7 @@ def render_pv_coverage_scenario_tool(cea_data, selected_buildings=None):
     if not values:
         st.warning("No PV result is available for this scenario.")
         return
+    st.session_state.pv_coverage_scenario_preview = values
 
     total_opaque_cells = 19
     active_cells = round(coverage / 100 * total_opaque_cells)
