@@ -2634,15 +2634,13 @@ def render_pv_coverage_scenario_tool(cea_data, selected_buildings=None):
     if st.session_state.get("pv_coverage_scenario"):
         st.info("A PV coverage scenario is saved for the Design Integration Recipe. You can adjust the slider and save again to replace it.")
     current = st.session_state.get("pv_coverage_pct", 50)
-    coverage = st.slider(
+    coverage = st.select_slider(
         "How much of the recommended facade PV area are you willing to cover?",
-        min_value=0,
-        max_value=100,
+        options=list(range(0, 101, 5)),
         value=int(current),
-        step=5,
-        format="%d%%",
         key="pv_coverage_pct"
     )
+    st.caption(f"Estimates below use {int(coverage)}% facade PV coverage.")
     values = compute_pv_coverage_scenario_values(cea_data, selected_buildings, coverage)
     if not values:
         st.warning("No PV result is available for this scenario.")
@@ -4804,4 +4802,3 @@ else:
                     response = call_llm(system_prompt, recent_history)
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
                 st.rerun()
-
