@@ -10,17 +10,32 @@ pinned: false
 ---
 # BIPV Analyst
 
-A web-based tool that helps architects interpret Building-Integrated Photovoltaics (BIPV) simulation results from the City Energy Analyst (CEA4). Upload your CEA project folder, select what you want to understand, and get plain-language analysis with design-ready insights.
+A web-based prototype that helps architects interpret Building-Integrated Photovoltaics (BIPV) simulation results from the City Energy Analyst (CEA4). Upload your CEA project folder, select what you want to understand, and get plain-language analysis with design-ready insights.
 
-Built as part of an MAS thesis at ETH Zürich, 2026.
+Built as part of the ETH Zürich semester project **From Simulation to Interpretation: Bridging BIPV Energy Modelling and Design Reasoning through LLM-Assisted Workflow**.
 
 ---
 
 ## What it does
 
-CEA4 produces detailed BIPV simulation outputs — irradiation CSVs, energy yield files, carbon and cost data — but presenting and interpreting these results requires significant manual effort. This tool automates that interpretation step using an LLM pipeline structured around a decision tree of 18 analysis skills.
+CEA4 produces detailed BIPV simulation outputs — irradiation CSVs, energy yield files, carbon and cost data — but presenting and interpreting these results requires significant manual effort. This tool explores a post-simulation processing workflow that makes those outputs easier to interpret during early architectural design.
 
-The architect uploads their CEA project zip, chooses what they want to understand (e.g. which surfaces are worth covering, what the carbon payback period is, how panel types compare), and receives a focused, design-relevant answer based on their actual simulation data.
+The architect uploads their CEA project zip, chooses what they want to understand (e.g. which surfaces are worth covering, what the carbon payback period is, how panel types compare), and receives a focused, design-relevant answer based on their actual simulation data. The LLM is used as an assistive interpretation layer: structured Python processing extracts project evidence, and predefined analysis skills shape that evidence into design-facing explanations.
+
+---
+
+## Research framing
+
+This repository supports a semester project at the Chair of Architecture and Building Systems, ETH Zürich. The project investigates whether an LLM-assisted post-processing layer can improve the interpretability of CEA BIPV outputs for architects and encourage earlier engagement with performance data while form, orientation, facade systems, and integration strategies are still flexible.
+
+The prototype is informed by:
+
+- review of CEA documentation, BIPV post-processing practices, and LLM-assisted numerical interpretation workflows
+- user workflow analysis with students who previously used CEA for BIPV-related design work
+- designer-needs research around how architects prefer to receive simulation evidence during conceptual design
+- experimental validation comparing standard CEA outputs with the LLM-enhanced workflow for a BIPV integration task
+
+The intended output is a documented semester-project prototype with a final report, codebase, example dataset, processed outputs, and a walkthrough demonstration.
 
 ---
 
@@ -28,10 +43,12 @@ The architect uploads their CEA project zip, chooses what they want to understan
 
 1. Run your BIPV simulations in CEA4
 2. Compress your CEA project folder to a `.zip` file
-3. Upload it at [bipv-analyst.hf.space](https://huggingface.co/spaces/ipekmertan/bipv-analyst) *(link to be added after deployment)*
+3. Upload it at [bipv-analyst.hf.space](https://huggingface.co/spaces/ipekmertan/bipv-analyst)
 4. Select an analysis from the decision tree
 5. Choose your output mode: **Key takeaway**, **Explain the numbers**, or **Design implication**
 6. Ask follow-up questions in the chat
+
+The workflow is designed around the research proposal's goal: bridging technical CEA outputs and architectural design reasoning. It does not replace CEA4 simulation; it helps translate existing simulation results into interpretable, design-relevant evidence.
 
 ---
 
@@ -43,31 +60,13 @@ bipv-llm-pipeline/
 ├── app.py                        ← Streamlit web application (main entry point)
 ├── requirements.txt              ← Python dependencies
 │
-├── skills/                       ← 18 analysis modules, one per SKILL.md
-│   ├── site-potential--solar-availability--surface-irradiation/
-│   ├── site-potential--solar-availability--temporal-availability--seasonal-patterns/
-│   ├── site-potential--solar-availability--temporal-availability--daily-patterns/
-│   ├── site-potential--envelope-suitability/
-│   ├── site-potential--massing-and-shading-strategy/
-│   ├── site-potential--contextual-feasibility--infrastructure-readiness/
-│   ├── site-potential--contextual-feasibility--regulatory-constraints/
-│   ├── site-potential--contextual-feasibility--basic-economic-signal/
-│   ├── performance-estimation--energy-generation/
-│   ├── performance-estimation--self-sufficiency/
-│   ├── impact-and-viability--carbon-impact--operational-carbon-footprint/
-│   ├── impact-and-viability--carbon-impact--carbon-payback/
-│   ├── impact-and-viability--economic-viability--cost-analysis/
-│   ├── impact-and-viability--economic-viability--investment-payback/
-│   ├── optimize-my-design--panel-type-tradeoff/
-│   ├── optimize-my-design--surface-prioritization/
-│   ├── optimize-my-design--envelope-simplification/
-│   └── optimize-my-design--construction-and-integration/
+├── skills/                       ← Skill prompt files and supporting analysis modules
 │
 └── configuration/
     └── skills-index.json         ← Decision tree structure, tooltips, skill metadata
 ```
 
-Each `SKILL.md` defines one analysis: what question it answers, which CEA files it reads, how it computes results, and how the LLM should present the output across the three output modes.
+The app's live decision tree is configured in `configuration/skills-index.json`. Most entries map to a `SKILL.md` file; a few interactive/local-calculation endpoints are handled directly in `app.py`.
 
 ---
 
@@ -79,7 +78,8 @@ Site Potential
  │    ├── Surface Irradiation
  │    └── Temporal Availability
  │         ├── Seasonal Patterns
- │         └── Daily Patterns
+ │         ├── Daily Patterns
+ │         └── Storage Necessity
  ├── Envelope Suitability
  ├── Massing & Shading Strategy
  └── Contextual Feasibility
@@ -89,21 +89,18 @@ Site Potential
 
 Performance Estimation
  ├── Energy Generation
- └── Self Sufficiency
+ ├── Self Sufficiency
+ └── Panel Type Trade-off
 
 Impact and Viability
  ├── Carbon Impact
- │    ├── Operational Carbon Footprint
+ │    ├── Carbon Footprint
  │    └── Carbon Payback Period
- └── Economic Viability
-      ├── Cost Analysis
-      └── Investment Payback
+ └── Cost Analysis
 
 Optimize My Design
- ├── Panel Type Trade-off
- ├── Surface Prioritisation
- ├── Envelope Simplification
- └── Construction & Integration
+ ├── PV Coverage Scenario
+ └── Design Integration Recipe
 ```
 
 ---
@@ -115,9 +112,9 @@ git clone https://github.com/ipekmertan/bipv-llm-pipeline.git
 cd bipv-llm-pipeline
 pip install -r requirements.txt
 
-# Add your Anthropic API key
-cp .streamlit/secrets.toml.example .streamlit/secrets.toml
-# Edit secrets.toml and add your key
+# Add your Groq API key
+mkdir -p .streamlit
+printf 'GROQ_API_KEY = "your-groq-api-key"\n' > .streamlit/secrets.toml
 
 streamlit run app.py
 ```
@@ -127,7 +124,7 @@ streamlit run app.py
 ## Tech stack
 
 - **Frontend & backend:** [Streamlit](https://streamlit.io)
-- **LLM:** Claude (Anthropic API) via `claude-sonnet-4-20250514`
+- **LLM:** Groq API via `llama-3.3-70b-versatile` and `llama-3.1-8b-instant`
 - **Data processing:** pandas
 - **Hosting:** Hugging Face Spaces
 - **Simulation data source:** [City Energy Analyst (CEA4)](https://github.com/architecture-building-systems/CityEnergyAnalyst)
@@ -136,4 +133,4 @@ streamlit run app.py
 
 ## Context
 
-This tool is developed as part of a Master of Advanced Studies thesis at ETH Zürich, exploring how LLM-assisted pipelines can make urban building energy simulation more accessible and actionable for architects in early design stages.
+This tool is developed as part of a semester project at ETH Zürich. The project asks whether an LLM layer can improve the interpretability of energy simulation data for architects, increase clarity and confidence, and support more sustainable decisions in early design stages.
