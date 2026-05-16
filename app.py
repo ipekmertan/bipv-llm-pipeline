@@ -60,6 +60,13 @@ h1, h2, h3 { font-family: 'Inter', serif; }
 .param-warning { background:#c0392b;color:white;border-radius:8px;padding:14px 16px;font-size:13px;line-height:1.6;margin-top:8px; }
 .param-ok { background:#f0fff4;border:1px solid #b2dfdb;border-radius:8px;padding:14px 16px;font-size:13px;color:#2e7d52;margin-top:8px; }
 .cluster-counter { background:white;border:1px solid #e0dcd4;border-radius:8px;padding:8px 14px;font-size:13px;color:#444;margin-bottom:8px; }
+.summary-grid, .kpi-grid { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.65rem;margin:.7rem 0 1rem; }
+.summary-card, .kpi-card { background:white;border:1px solid #e8e4dc;border-radius:8px;padding:.75rem .85rem;min-height:74px; }
+.summary-label, .kpi-label { color:#777d8c;font-size:.74rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:.2rem; }
+.summary-value, .kpi-value { color:#2d3142;font-size:1.05rem;font-weight:650;line-height:1.25; }
+.summary-note, .kpi-note { color:#5f6675;font-size:.76rem;line-height:1.35;margin-top:.25rem; }
+.response-tools { clear:both;display:flex;gap:.45rem;align-items:center;margin:.1rem 0 .8rem 0; }
+@media (max-width: 760px) { .summary-grid, .kpi-grid { grid-template-columns:1fr 1fr; } }
 </style>
 """, unsafe_allow_html=True)
 
@@ -729,6 +736,225 @@ def _format_number(value, unit="", decimals=0):
 
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def _safe_html(text):
+    return html.escape("" if text is None else str(text))
+
+
+def _scope_selection_from_state():
+    scale = st.session_state.get("tree_scale")
+    if scale == "Building" and st.session_state.get("selected_building"):
+        return [st.session_state.selected_building]
+    if scale == "Cluster" and st.session_state.get("selected_cluster"):
+        return st.session_state.selected_cluster
+    return None
+
+
+def _skill_path_for_id(skill_id):
+    def walk(nodes, path):
+        for label, node in nodes.items():
+            next_path = path + [label]
+            if node.get("id") == skill_id:
+                return next_path
+            child_path = walk(node.get("children", {}), next_path)
+            if child_path:
+                return child_path
+        return None
+    return walk(TREE, [])
+
+
+def render_project_summary_card(cea_data, threshold_result=None):
+    files = cea_data.get("files", {})
+    building_count = len(get_building_names(cea_data))
+    simulations = cea_data.get("available_simulations", [])
+    city = country = None
+    if threshold_result and not threshold_result.get("error"):
+        city = (threshold_result.get("location") or {}).get("city")
+        country = threshold_result.get("country")
+    if not city and files.get("weather_header"):
+        city, country = _parse_weather_place(files.get("weather_header", ""))
+
+    threshold_note = "not checked"
+    if threshold_result:
+        if threshold_result.get("error"):
+            threshold_note = "could not be checked"
+        else:
+            recommended = threshold_result.get("recommended_threshold")
+            basis = threshold_result.get("threshold_basis", "threshold")
+            threshold_note = f"{_format_number(recommended, ' kWh/m2/year')} ({basis.replace('_', ' ')})"
+
+    expected = {
+        "weather": "weather_header" in files,
+        "irradiation": "Solar Irradiation" in simulations,
+        "PV": "PV Yield" in simulations,
+        "demand": "Demand" in simulations,
+    }
+    missing = [name for name, ok in expected.items() if not ok]
+    missing_text = "All core files detected" if not missing else "Missing: " + ", ".join(missing)
+    location = ", ".join(p for p in [city, country] if p and p != "-") or "not parsed"
+
+    st.markdown(f"""
+    <div class="summary-grid">
+      <div class="summary-card"><div class="summary-label">Buildings</div><div class="summary-value">{building_count or "not found"}</div><div class="summary-note">from CEA geometry/results</div></div>
+      <div class="summary-card"><div class="summary-label">Simulations</div><div class="summary-value">{_safe_html(", ".join(simulations) or "none")}</div><div class="summary-note">{_safe_html(missing_text)}</div></div>
+      <div class="summary-card"><div class="summary-label">Weather</div><div class="summary-value">{_safe_html(location)}</div><div class="summary-note">parsed from EPW header</div></div>
+      <div class="summary-card"><div class="summary-label">Radiation Check</div><div class="summary-value">{_safe_html(threshold_note)}</div><div class="summary-note">shown again for relevant analyses</div></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def compute_decision_kpis(cea_data, selected_buildings=None):
+    files = cea_data.get("files", {})
+    scope = _pv_scope_for_metrics(cea_data, selected_buildings)
+    demand_hourly, demand_source = _sum_hourly_demand_series(files, selected_buildings)
+    annual_demand = float(demand_hourly.sum()) if demand_hourly is not None else None
+    annual_pv = scope.get("annual_kwh") if scope else None
+
+    pv_fname = next((k for k in files if k.startswith("PV_PV") and k.endswith("_total.csv") and "buildings" not in k), None)
+    self_consumed = exported = self_sufficiency = self_consumption = None
+    if pv_fname and annual_pv is not None and demand_hourly is not None:
+        pv_df = files.get(pv_fname)
+        gen_col = _find_metric_col(pv_df, "E_PV_gen", "E_PV", "gen") if pv_df is not None else None
+        if gen_col:
+            district_annual = float(pd.to_numeric(pv_df[gen_col], errors="coerce").fillna(0).sum())
+            pv_scale = annual_pv / district_annual if district_annual > 0 else 1.0
+            pv_hourly = pd.to_numeric(pv_df[gen_col], errors="coerce").fillna(0).reset_index(drop=True) * pv_scale
+            n = min(len(pv_hourly), len(demand_hourly))
+            if n:
+                pv_hourly = pv_hourly.iloc[:n].reset_index(drop=True)
+                demand_use = demand_hourly.iloc[:n].reset_index(drop=True)
+                self_consumed = float(pd.concat([pv_hourly, demand_use], axis=1).min(axis=1).sum())
+                exported = max(float(pv_hourly.sum()) - self_consumed, 0.0)
+                annual_demand = float(demand_use.sum())
+                self_sufficiency = self_consumed / annual_demand * 100 if annual_demand > 0 else None
+                self_consumption = self_consumed / float(pv_hourly.sum()) * 100 if float(pv_hourly.sum()) > 0 else None
+
+    economic_screen = compute_basic_economic_project_screen(cea_data, selected_buildings)
+    payback_match = re.search(r"Simple payback screen from project data:\s*([0-9.,]+)\s*years(?:[–-]([0-9.,]+)\s*years)?", economic_screen or "")
+    payback_text = "not available"
+    if payback_match:
+        if payback_match.group(2):
+            payback_text = f"{payback_match.group(1)}-{payback_match.group(2)} years"
+        else:
+            payback_text = f"{payback_match.group(1)} years"
+
+    grid_carbon, grid_source = _grid_carbon_factor_for_metrics(cea_data)
+    avoided_tco2 = self_consumed * grid_carbon / 1000 if self_consumed is not None else None
+    lcoe_text = "see economic screen"
+    inv = re.search(r"Installed BIPV investment screen:\s*([^\n]+)", economic_screen or "")
+    gen = annual_pv
+    if inv and gen and gen > 0:
+        nums = [float(v.replace(",", "")) for v in re.findall(r"([0-9][0-9,]*)", inv.group(1))[:2]]
+        if len(nums) == 2:
+            lcoe_lo = nums[0] / (gen * 25)
+            lcoe_hi = nums[1] / (gen * 25)
+            lcoe_text = f"{lcoe_lo:.2f}-{lcoe_hi:.2f}/kWh"
+
+    return [
+        ("Self-sufficiency", _format_number(self_sufficiency, "%", 1), f"hourly PV-demand overlap; {demand_source or 'demand source missing'}"),
+        ("Self-consumption", _format_number(self_consumption, "%", 1), "share of PV used directly on site"),
+        ("LCOE / payback", lcoe_text, f"simple payback: {payback_text}"),
+        ("Abated emissions", _format_number(avoided_tco2, " tCO2/year", 1), f"grid carbon from {grid_source}"),
+    ]
+
+
+def render_key_metrics(cea_data, selected_buildings=None):
+    kpis = compute_decision_kpis(cea_data, selected_buildings)
+    cards = []
+    for label, value, note in kpis:
+        cards.append(
+            f'<div class="kpi-card"><div class="kpi-label">{_safe_html(label)}</div>'
+            f'<div class="kpi-value">{_safe_html(value)}</div><div class="kpi-note">{_safe_html(note)}</div></div>'
+        )
+    st.markdown('<div class="kpi-grid">' + "".join(cards) + '</div>', unsafe_allow_html=True)
+
+
+def _download_name(index, suffix):
+    skill = re.sub(r"[^a-zA-Z0-9]+", "-", st.session_state.get("skill_name") or "bipv-analysis").strip("-").lower()
+    return f"{skill or 'bipv-analysis'}-response-{index}.{suffix}"
+
+
+def render_response_tools(content, index):
+    st.download_button("Download .txt", content, file_name=_download_name(index, "txt"), mime="text/plain", key=f"download_txt_{index}")
+    st.download_button("Download .md", content, file_name=_download_name(index, "md"), mime="text/markdown", key=f"download_md_{index}")
+    copy_payload = json.dumps(content)
+    components.html(f"""
+    <button id="copy-{index}" style="border:1px solid #e0dcd4;border-radius:8px;background:white;padding:6px 10px;cursor:pointer;">Copy</button>
+    <script>
+    const btn = document.getElementById("copy-{index}");
+    btn.onclick = async () => {{
+      await navigator.clipboard.writeText({copy_payload});
+      btn.textContent = "Copied";
+      setTimeout(() => btn.textContent = "Copy", 1400);
+    }};
+    </script>
+    """, height=38)
+
+
+def render_session_history_panel():
+    log = st.session_state.get("analysis_log", [])
+    if not log:
+        return
+    with st.expander(f"Session history ({len(log)} completed analyses)", expanded=False):
+        for idx, item in enumerate(log, start=1):
+            label = item.get("skill_name") or item.get("skill_id") or "Analysis"
+            mode = item.get("mode") or "output"
+            scale = item.get("scale") or "scale not set"
+            buildings = item.get("selected_buildings") or []
+            building_text = f" · {', '.join(buildings)}" if buildings else ""
+            cols = st.columns([4, 1])
+            with cols[0]:
+                st.markdown(f"**{idx}. {label}** · {mode} · {scale}{building_text}")
+                st.caption(_shorten_for_recipe(item.get("response", ""), 180))
+            with cols[1]:
+                if st.button("Re-open", key=f"reopen_history_{idx}"):
+                    path = item.get("tree_path") or _skill_path_for_id(item.get("skill_id"))
+                    if path:
+                        st.session_state.tree_goal = path[0] if len(path) > 0 else None
+                        st.session_state.tree_sub = path[1] if len(path) > 1 else None
+                        st.session_state.tree_subsub = path[2] if len(path) > 2 else None
+                        st.session_state.tree_subsubsub = path[3] if len(path) > 3 else None
+                    st.session_state.skill_id = item.get("skill_id")
+                    st.session_state.skill_name = label
+                    st.session_state.tree_scale = scale
+                    st.session_state.tree_mode = mode
+                    if scale == "Building" and buildings:
+                        st.session_state.selected_building = buildings[0]
+                    elif scale == "Cluster":
+                        st.session_state.selected_cluster = buildings
+                    st.session_state.chat_history = [
+                        {"role": "user", "content": f"Re-opened {label} from session history."},
+                        {"role": "assistant", "content": item.get("response", "")},
+                    ]
+                    st.session_state.cached_system_prompt = item.get("system_prompt") or st.session_state.get("cached_system_prompt")
+                    st.session_state.cached_data_summary = item.get("data_summary") or st.session_state.get("cached_data_summary")
+                    st.session_state.analysis_ran = True
+                    st.rerun()
+
+
+def find_prior_answer_context(question):
+    query_terms = {t for t in re.findall(r"[a-zA-Z]{4,}", question.lower()) if t not in {"what", "which", "should", "could", "would", "about", "from", "with", "this", "that", "have"}}
+    if not query_terms:
+        return ""
+    candidates = []
+    for item in st.session_state.get("analysis_log", []):
+        text = item.get("response", "")
+        haystack = f"{item.get('skill_name', '')} {text}".lower()
+        score = sum(1 for term in query_terms if term in haystack)
+        if score:
+            candidates.append((score, item.get("skill_name") or "previous analysis", text))
+    for msg in st.session_state.get("chat_history", []):
+        if msg.get("role") != "assistant":
+            continue
+        text = msg.get("content", "")
+        score = sum(1 for term in query_terms if term in text.lower())
+        if score:
+            candidates.append((score, "current answer", text))
+    if not candidates:
+        return ""
+    _, label, text = max(candidates, key=lambda item: item[0])
+    return f"Relevant prior answer found in {label}: {_shorten_for_recipe(text, 900)}"
 
 
 def _monthly_from_hourly(df, col):
@@ -4567,6 +4793,7 @@ for k, v in [("cea_data", None), ("chat_history", []),
               ("selected_building", None), ("selected_cluster", []),
               ("reasoning_open", False), ("reasoning_threshold", False),
               ("cached_system_prompt", None), ("tree_subsubsub", None),
+              ("cached_data_summary", None),
               ("analysis_log", []), ("pv_coverage_scenario", None),
               ("pv_coverage_pct", 50)]:   # FIX 2: cache slot
     if k not in st.session_state:
@@ -4602,6 +4829,8 @@ else:
         st.markdown("### Build your analysis")
         sims = st.session_state.cea_data["available_simulations"]
         st.caption("Loaded: " + " · ".join(f"✓ {s}" for s in sims))
+        render_project_summary_card(st.session_state.cea_data, st.session_state.get("threshold_result"))
+        render_session_history_panel()
         st.markdown("")
 
         # Step 1: Scale
@@ -4866,7 +5095,7 @@ else:
             if st.button("↺ Start over"):
                 for k in ["tree_scale","tree_goal","tree_sub","tree_subsub","tree_subsubsub",
                           "tree_mode","skill_id","skill_name","analysis_ran",
-                          "selected_building","selected_cluster","cached_system_prompt"]:
+                          "selected_building","selected_cluster","cached_system_prompt","cached_data_summary"]:
                     st.session_state[k] = None if k != "selected_cluster" else []
                 st.session_state.chat_history = []
                 st.rerun()
@@ -4875,7 +5104,7 @@ else:
                 for k in ["cea_data","tree_scale","tree_goal","tree_sub","tree_subsub","tree_subsubsub",
                           "tree_mode","skill_id","skill_name","analysis_ran",
                           "threshold_result","param_check_hidden",
-                          "selected_building","selected_cluster","cached_system_prompt","analysis_log",
+                          "selected_building","selected_cluster","cached_system_prompt","cached_data_summary","analysis_log",
                           "pv_coverage_scenario","pv_coverage_pct","pv_coverage_pct_widget"]:
                     st.session_state[k] = None if k != "selected_cluster" else []
                 st.session_state.analysis_log = []
@@ -4914,6 +5143,7 @@ else:
                 selected_buildings=selected_buildings,
                 scale=scale
             )
+            st.session_state.cached_data_summary = cea_summary
             # FIX 2: Build system prompt once and cache it
             system_prompt = build_system_prompt(
                 skill_md, cea_summary,
@@ -4940,6 +5170,16 @@ else:
                 "scale": scale,
                 "selected_buildings": selected_buildings or [],
                 "response": response,
+                "tree_path": [
+                    value for value in [
+                        st.session_state.tree_goal,
+                        st.session_state.tree_sub,
+                        st.session_state.tree_subsub,
+                        st.session_state.tree_subsubsub,
+                    ] if value
+                ],
+                "system_prompt": system_prompt,
+                "data_summary": cea_summary,
             })
             st.rerun()
 
@@ -4950,6 +5190,7 @@ else:
         elif st.session_state.skill_id and st.session_state.threshold_result:
             render_parameter_check(st.session_state.threshold_result, st.session_state.skill_id)
             st.markdown("**Analysis results**")
+            render_key_metrics(st.session_state.cea_data, _scope_selection_from_state())
 
         for i, msg in enumerate(st.session_state.chat_history):
             if msg["role"] == "user" and i == 0:
@@ -4962,6 +5203,11 @@ else:
                 st.markdown('<div class="bubble-ai">', unsafe_allow_html=True)
                 st.markdown(msg["content"])
                 st.markdown('</div><div class="clearfix"></div>', unsafe_allow_html=True)
+                render_response_tools(msg["content"], i)
+                if i == 1 and st.session_state.get("cached_data_summary"):
+                    with st.expander("View data used"):
+                        st.markdown("This answer was based on these values from your CEA files.")
+                        st.code(st.session_state.cached_data_summary, language="markdown")
                 if i == 1:
                     render_massing_strategy_sketches(
                         msg["content"],
@@ -4989,6 +5235,18 @@ else:
                         )
                         if _chart is not None:
                             st.altair_chart(_chart, use_container_width=True)
+                            try:
+                                chart_png = io.BytesIO()
+                                _chart.save(chart_png, format="png")
+                                st.download_button(
+                                    "Download chart .png",
+                                    chart_png.getvalue(),
+                                    file_name=_download_name(i, "png"),
+                                    mime="image/png",
+                                    key=f"download_chart_png_{i}"
+                                )
+                            except Exception:
+                                st.caption("Chart PNG export requires vl-convert-python; the chart is still visible above.")
                     except Exception as e:
                         st.warning(f"Chart could not render: {e}")
 
@@ -4999,9 +5257,24 @@ else:
             if st.button("Send") and followup.strip():
                 # FIX 2 + FIX 3: use cached system prompt, send only last 4 messages
                 system_prompt = st.session_state.get("cached_system_prompt") or ""
+                prior_context = find_prior_answer_context(followup)
+                if prior_context:
+                    system_prompt += (
+                        "\n\n## Follow-up routing\n"
+                        "Before directing the user back to CEA4 or asking them to rerun simulations, first guide them to the relevant result already produced in this session. "
+                        "Use the prior answer below as the first evidence source. Only say that CEA4 is needed if the existing answer and supplied data genuinely do not contain the requested detail.\n"
+                        f"{prior_context}"
+                    )
+                else:
+                    system_prompt += (
+                        "\n\n## Follow-up routing\n"
+                        "For follow-up questions, first check whether the current prompt context and prior chat answer already contain the answer. "
+                        "Guide the user to that existing result before suggesting they go back to CEA4. Suggest CEA4 only for data that is absent, stale, or requires a new simulation."
+                    )
                 st.session_state.chat_history.append({"role": "user", "content": followup})
                 recent_history = st.session_state.chat_history[-4:]  # FIX 3: cap history
                 with st.spinner("Thinking…"):
                     response = call_llm(system_prompt, recent_history)
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
                 st.rerun()
+
